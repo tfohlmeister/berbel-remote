@@ -30,9 +30,11 @@
  *   - Luefter         (select)         Fan speed: Aus, Stufe 1-3, Power
  *   - Ausschalten     (button)         Power off (starts Nachlauf)
  *   - Nachlauf        (switch)         Toggle afterrun timer
- *   - Position        (select)         Oben/Unten
+ *   - Position        (select)         Oben/Unten (only with HOOD_HAS_COVER)
+ *   - Hochfahren      (button)         Move up unconditionally (only with HOOD_HAS_COVER)
+ *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_COVER)
  *   - BLE Verbindung  (binary_sensor)  BLE connection status
- *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down
+ *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_COVER)
  *   - Status Raw      (sensor)         Raw 9-byte hex for debugging
  *
  * Critical requirements:
@@ -89,9 +91,11 @@
 #define MQTT_CMD_FAN_PRESET MQTT_BASE "/fan/preset/set"
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
 #define MQTT_CMD_NACHLAUF   MQTT_BASE "/nachlauf/set"
+#if HOOD_HAS_COVER
 #define MQTT_CMD_POSITION   MQTT_BASE "/position/set"
 #define MQTT_CMD_MOVE_UP    MQTT_BASE "/move_up/set"
 #define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
+#endif
 #define MQTT_CMD_DEBUG      MQTT_BASE "/debug/send"
 
 // ============================================================================
@@ -102,8 +106,10 @@ struct HoodState {
   bool lightDown = false;
   uint8_t fanSpeed = 0;  // 0=off, 1-4
   bool nachlauf = false;  // timer/afterrun active
+#if HOOD_HAS_COVER
   const char* position = "Oben";        // Oben, Unten, Fährt hoch, Fährt runter
   const char* coverState = "up";  // up, moving up, moving down, down
+#endif
   bool bleConnected = false;
   uint8_t raw[9] = {0};
 };
@@ -311,8 +317,10 @@ void publishState() {
     "\"light_down\":\"%s\","
     "\"fan_preset\":\"%s\","
     "\"nachlauf\":\"%s\","
+#if HOOD_HAS_COVER
     "\"position\":\"%s\","
     "\"cover_state\":\"%s\","
+#endif
     "\"ble\":\"%s\","
     "\"status_raw\":\"%02X %02X %02X %02X %02X %02X %02X %02X %02X\""
     "}",
@@ -320,8 +328,10 @@ void publishState() {
     hood.lightDown ? "ON" : "OFF",
     fanPresetName(hood.fanSpeed),
     hood.nachlauf ? "ON" : "OFF",
+#if HOOD_HAS_COVER
     hood.position,
     hood.coverState,
+#endif
     hood.bleConnected ? "ON" : "OFF",
     hood.raw[0], hood.raw[1], hood.raw[2], hood.raw[3], hood.raw[4],
     hood.raw[5], hood.raw[6], hood.raw[7], hood.raw[8]);
@@ -397,6 +407,7 @@ void publishDiscovery() {
     "\"ic\":\"mdi:fan\""
   );
 
+#if HOOD_HAS_COVER
   // Position (select: Oben/Unten)
   publishDiscoveryMsg(
     "homeassistant/select/berbel_hood/position/config",
@@ -408,6 +419,7 @@ void publishDiscovery() {
     "\"ops\":[\"Oben\",\"Unten\"],"
     "\"ic\":\"mdi:arrow-up-down\""
   );
+#endif
 
   // BLE Connection Status (diagnostic)
   publishDiscoveryMsg(
@@ -440,6 +452,7 @@ void publishDiscovery() {
     "\"ic\":\"mdi:timer-sand\""
   );
 
+#if HOOD_HAS_COVER
   // Move Up button (unconditional)
   publishDiscoveryMsg(
     "homeassistant/button/berbel_hood/move_up/config",
@@ -468,6 +481,7 @@ void publishDiscovery() {
     "\"ent_cat\":\"diagnostic\","
     "\"ic\":\"mdi:arrow-up-down\""
   );
+#endif
 
   // Raw Status (diagnostic, for reverse engineering)
   publishDiscoveryMsg(
@@ -517,6 +531,7 @@ void restoreStateFromMqtt(const char* json) {
     else if (strcmp(val, "Power") == 0)    hood.fanSpeed = 4;
     else                                  hood.fanSpeed = 0;
   }
+#if HOOD_HAS_COVER
   if (jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
   if (jsonGetValue(json, "cover_state", val, sizeof(val))) {
@@ -525,11 +540,17 @@ void restoreStateFromMqtt(const char* json) {
     else if (strcmp(val, "moving down") == 0) hood.coverState = "moving down";
     else                                   hood.coverState = "up";
   }
+#endif
 
   hoodStateValid = true;
   mqtt.unsubscribe(MQTT_STATE);
+#if HOOD_HAS_COVER
   Serial.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d pos=%s\n",
     hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf, hood.position);
+#else
+  Serial.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d\n",
+    hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf);
+#endif
 }
 
 // ============================================================================
@@ -599,6 +620,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     queueButton(btnCode, btnName);
   }
+#if HOOD_HAS_COVER
   // Position (Oben/Unten)
   else if (t == MQTT_CMD_POSITION) {
     if (strcmp(msg, "Oben") == 0)        queueButton(BTN_MOVE_UP, "Move Up");
@@ -612,6 +634,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   else if (t == MQTT_CMD_MOVE_DOWN) {
     queueButton(BTN_MOVE_DOWN, "Move Down");
   }
+#endif
   // HA restart - re-publish discovery
   else if (t == "homeassistant/status" && strcmp(msg, "online") == 0) {
     Serial.println("[MQTT] HA restarted, re-publishing discovery...");
@@ -695,9 +718,11 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_POWER);
     mqtt.subscribe(MQTT_CMD_NACHLAUF);
     mqtt.subscribe(MQTT_CMD_FAN_PRESET);
+#if HOOD_HAS_COVER
     mqtt.subscribe(MQTT_CMD_POSITION);
     mqtt.subscribe(MQTT_CMD_MOVE_UP);
     mqtt.subscribe(MQTT_CMD_MOVE_DOWN);
+#endif
     mqtt.subscribe(MQTT_CMD_DEBUG);
     mqtt.subscribe("homeassistant/status");
 
@@ -947,6 +972,7 @@ void loop() {
       // Nachlauf (parallel to fan speed)
       hood.nachlauf = (hood.raw[5] & 0x90);
 
+#if HOOD_HAS_COVER
       // Cover state (byte[4] bit 0 = moving up, byte[6] bit 0 = moving down)
       if (hood.raw[4] & 0x01) {
         hood.coverState = "moving up";
@@ -959,6 +985,7 @@ void loop() {
       } else if (strcmp(hood.coverState, "moving down") == 0) {
         hood.coverState = "down";
       }
+#endif
 
       publishState();
     }
