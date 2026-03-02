@@ -90,6 +90,8 @@
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
 #define MQTT_CMD_NACHLAUF   MQTT_BASE "/nachlauf/set"
 #define MQTT_CMD_POSITION   MQTT_BASE "/position/set"
+#define MQTT_CMD_MOVE_UP    MQTT_BASE "/move_up/set"
+#define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
 #define MQTT_CMD_DEBUG      MQTT_BASE "/debug/send"
 
 // ============================================================================
@@ -438,6 +440,24 @@ void publishDiscovery() {
     "\"ic\":\"mdi:timer-sand\""
   );
 
+  // Move Up button (unconditional)
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/move_up/config",
+    "\"name\":\"Hochfahren\","
+    "\"uniq_id\":\"berbel_move_up\","
+    "\"cmd_t\":\"" MQTT_CMD_MOVE_UP "\","
+    "\"ic\":\"mdi:arrow-up\""
+  );
+
+  // Move Down button (unconditional)
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/move_down/config",
+    "\"name\":\"Herunterfahren\","
+    "\"uniq_id\":\"berbel_move_down\","
+    "\"cmd_t\":\"" MQTT_CMD_MOVE_DOWN "\","
+    "\"ic\":\"mdi:arrow-down\""
+  );
+
   // Cover State (diagnostic)
   publishDiscoveryMsg(
     "homeassistant/sensor/berbel_hood/cover_state/config",
@@ -584,6 +604,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (strcmp(msg, "Oben") == 0)        queueButton(BTN_MOVE_UP, "Move Up");
     else if (strcmp(msg, "Unten") == 0)  queueButton(BTN_MOVE_DOWN, "Move Down");
   }
+  // Move Up button (unconditional, ignores tracked position)
+  else if (t == MQTT_CMD_MOVE_UP) {
+    queueButton(BTN_MOVE_UP, "Move Up");
+  }
+  // Move Down button (unconditional, ignores tracked position)
+  else if (t == MQTT_CMD_MOVE_DOWN) {
+    queueButton(BTN_MOVE_DOWN, "Move Down");
+  }
   // HA restart - re-publish discovery
   else if (t == "homeassistant/status" && strcmp(msg, "online") == 0) {
     Serial.println("[MQTT] HA restarted, re-publishing discovery...");
@@ -668,6 +696,8 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_NACHLAUF);
     mqtt.subscribe(MQTT_CMD_FAN_PRESET);
     mqtt.subscribe(MQTT_CMD_POSITION);
+    mqtt.subscribe(MQTT_CMD_MOVE_UP);
+    mqtt.subscribe(MQTT_CMD_MOVE_DOWN);
     mqtt.subscribe(MQTT_CMD_DEBUG);
     mqtt.subscribe("homeassistant/status");
 
