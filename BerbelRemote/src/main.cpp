@@ -55,6 +55,7 @@
 #include <ArduinoOTA.h>
 
 #include "config.h"
+#include "berbel_protocol.h"
 
 // ============================================================================
 // Berbel Custom Service UUIDs
@@ -286,16 +287,6 @@ void processCmdQueue() {
 // ============================================================================
 // MQTT State Publishing
 // ============================================================================
-static const char* fanPresetName(uint8_t speed) {
-  switch (speed) {
-    case 1: return "Stufe 1";
-    case 2: return "Stufe 2";
-    case 3: return "Stufe 3";
-    case 4: return "Power";
-    default: return "Aus";
-  }
-}
-
 void publishState() {
   if (!mqtt.connected()) return;
 
@@ -326,7 +317,7 @@ void publishState() {
     "}",
     hood.lightUp ? "ON" : "OFF",
     hood.lightDown ? "ON" : "OFF",
-    fanPresetName(hood.fanSpeed),
+    berbel::fanPresetName(hood.fanSpeed),
     hood.nachlauf ? "ON" : "OFF",
 #if HOOD_HAS_COVER
     hood.position,
@@ -501,40 +492,21 @@ void publishDiscovery() {
 // ============================================================================
 // Restore hood state from retained MQTT message (simple JSON parser)
 // ============================================================================
-static bool jsonGetValue(const char* json, const char* key, char* out, size_t outLen) {
-  // Find "key":"value" in JSON string
-  char search[32];
-  snprintf(search, sizeof(search), "\"%s\":\"", key);
-  const char* start = strstr(json, search);
-  if (!start) return false;
-  start += strlen(search);
-  const char* end = strchr(start, '"');
-  if (!end || (size_t)(end - start) >= outLen) return false;
-  memcpy(out, start, end - start);
-  out[end - start] = '\0';
-  return true;
-}
-
 void restoreStateFromMqtt(const char* json) {
   char val[32];
 
-  if (jsonGetValue(json, "light_up", val, sizeof(val)))
+  if (berbel::jsonGetValue(json, "light_up", val, sizeof(val)))
     hood.lightUp = (strcmp(val, "ON") == 0);
-  if (jsonGetValue(json, "light_down", val, sizeof(val)))
+  if (berbel::jsonGetValue(json, "light_down", val, sizeof(val)))
     hood.lightDown = (strcmp(val, "ON") == 0);
-  if (jsonGetValue(json, "nachlauf", val, sizeof(val)))
+  if (berbel::jsonGetValue(json, "nachlauf", val, sizeof(val)))
     hood.nachlauf = (strcmp(val, "ON") == 0);
-  if (jsonGetValue(json, "fan_preset", val, sizeof(val))) {
-    if (strcmp(val, "Stufe 1") == 0)      hood.fanSpeed = 1;
-    else if (strcmp(val, "Stufe 2") == 0)  hood.fanSpeed = 2;
-    else if (strcmp(val, "Stufe 3") == 0)  hood.fanSpeed = 3;
-    else if (strcmp(val, "Power") == 0)    hood.fanSpeed = 4;
-    else                                  hood.fanSpeed = 0;
-  }
+  if (berbel::jsonGetValue(json, "fan_preset", val, sizeof(val)))
+    hood.fanSpeed = berbel::fanPresetToSpeed(val);
 #if HOOD_HAS_COVER
-  if (jsonGetValue(json, "position", val, sizeof(val)))
+  if (berbel::jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
-  if (jsonGetValue(json, "cover_state", val, sizeof(val))) {
+  if (berbel::jsonGetValue(json, "cover_state", val, sizeof(val))) {
     if (strcmp(val, "down") == 0)           hood.coverState = "down";
     else if (strcmp(val, "moving up") == 0) hood.coverState = "moving up";
     else if (strcmp(val, "moving down") == 0) hood.coverState = "moving down";
@@ -948,43 +920,23 @@ void loop() {
     newStatusReceived = false;
 
     // Skip the sync packet (all 0x11) entirely
-    bool isSync = true;
-    for (int i = 0; i < 9; i++) {
-      if (pendingStatus[i] != 0x11) { isSync = false; break; }
-    }
-    if (isSync) {
+    if (berbel::isSyncPacket(pendingStatus)) {
       Serial.println("[HOOD] Sync packet ignored");
     } else {
       hoodStateValid = true;
       memcpy(hood.raw, pendingStatus, 9);
 
-      // Lights (bitmask - bits don't overlap with fan)
-      hood.lightUp   = (hood.raw[2] & 0x10);  // Oberlicht: bit 4
-      hood.lightDown = (hood.raw[4] & 0x10);  // Unterlicht: bit 4
-
-      // Fan speed (bitmask - only one active at a time)
-      if (hood.raw[2] & 0x09)               hood.fanSpeed = 4;  // Power: 0000 1001
-      else if (hood.raw[1] & 0x10)          hood.fanSpeed = 3;  // Stufe 3: 0001 0000
-      else if (hood.raw[1] & 0x01)          hood.fanSpeed = 2;  // Stufe 2: 0000 0001
-      else if (hood.raw[0] & 0x10)          hood.fanSpeed = 1;  // Stufe 1: 0001 0000
-      else                                  hood.fanSpeed = 0;  // Aus
-
-      // Nachlauf (parallel to fan speed)
-      hood.nachlauf = (hood.raw[5] & 0x90);
+      berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw);
+      hood.lightUp   = status.lightUp;
+      hood.lightDown = status.lightDown;
+      hood.fanSpeed  = status.fanSpeed;
+      hood.nachlauf  = status.nachlauf;
 
 #if HOOD_HAS_COVER
-      // Cover state (byte[4] bit 0 = moving up, byte[6] bit 0 = moving down)
-      if (hood.raw[4] & 0x01) {
-        hood.coverState = "moving up";
-        hood.position = "Oben";
-      } else if (hood.raw[6] & 0x01) {
-        hood.coverState = "moving down";
-        hood.position = "Unten";
-      } else if (strcmp(hood.coverState, "moving up") == 0) {
-        hood.coverState = "up";
-      } else if (strcmp(hood.coverState, "moving down") == 0) {
-        hood.coverState = "down";
-      }
+      berbel::CoverResult cover = berbel::nextCoverState(
+        hood.coverState, hood.position, status.movingUp, status.movingDown);
+      hood.coverState = cover.state;
+      hood.position = cover.position;
 #endif
 
       publishState();
