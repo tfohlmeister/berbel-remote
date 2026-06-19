@@ -1,5 +1,7 @@
 # Berbel BFB 6bT - BLE Remote Control Emulator
 
+[![tests](https://github.com/tfohlmeister/berbel-remote/actions/workflows/test.yml/badge.svg)](https://github.com/tfohlmeister/berbel-remote/actions/workflows/test.yml)
+
 ESP32-based emulator for the **Berbel BFB 6bT** remote control (Art. 1090045), with full Home Assistant integration via MQTT. Tested with a Berbel Skyline Frame hood, but the BFB 6bT remote is compatible with other Berbel hoods as well.
 
 > **Disclaimer:** This is an **unofficial**, independent project created through reverse engineering.
@@ -173,15 +175,34 @@ See [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) for the full protocol docum
 berbel-remote/
 ├── BerbelRemote/              # ESP32 firmware (PlatformIO)
 │   ├── src/
-│   │   ├── main.cpp              # Complete firmware source
+│   │   ├── main.cpp              # Firmware: BLE/WiFi/MQTT wiring
+│   │   ├── berbel_protocol.h     # Pure protocol logic (unit-tested)
 │   │   ├── config.example.h      # WiFi/MQTT config template
 │   │   └── config.h              # Your credentials (gitignored)
+│   ├── test/
+│   │   └── test_protocol/        # Host-side unit tests (Unity)
 │   └── platformio.ini            # Build configuration
+├── .github/workflows/test.yml     # CI: unit tests + firmware build
 ├── REVERSE_ENGINEERING.md         # Full protocol documentation
 ├── berbel_button_map.json        # Button code mapping (machine-readable)
 ├── LICENSE                       # MIT License
 └── README.md
 ```
+
+## Testing
+
+The reverse-engineered protocol logic (status decoding, fan/cover state, JSON
+parsing) lives in `src/berbel_protocol.h` as dependency-free functions, so it
+can be unit-tested on the host without an ESP32:
+
+```bash
+cd BerbelRemote
+pio test -e native
+```
+
+CI runs these tests and a full firmware compile check on every push (see the
+tests badge at the top). The hardware I/O (BLE, WiFi, MQTT, OTA) is exercised on
+the device, not in CI.
 
 ## Contributing
 
