@@ -107,4 +107,33 @@ inline bool jsonGetValue(const char* json, const char* key, char* out, size_t ou
   return true;
 }
 
+// Parse the space-separated 9-byte hex string used for `status_raw`
+// (e.g. "00 00 00 00 10 00 00 00 00") back into raw bytes. `out` is only
+// written on success. Returns false unless the string holds exactly 9
+// two-digit hex bytes separated by single spaces.
+inline bool parseStatusRaw(const char* s, uint8_t out[9]) {
+  auto hexVal = [](char c) -> int {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+  };
+
+  uint8_t parsed[9];
+  const char* p = s;
+  for (int i = 0; i < 9; i++) {
+    if (i > 0 && *p++ != ' ') return false;
+    int hi = hexVal(p[0]);
+    if (hi < 0) return false;
+    int lo = hexVal(p[1]);
+    if (lo < 0) return false;
+    parsed[i] = (uint8_t)((hi << 4) | lo);
+    p += 2;
+  }
+  if (*p != '\0') return false;
+
+  memcpy(out, parsed, 9);
+  return true;
+}
+
 }  // namespace berbel

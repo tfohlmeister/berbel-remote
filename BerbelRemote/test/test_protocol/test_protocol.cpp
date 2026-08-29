@@ -214,6 +214,54 @@ void test_json_get_value_buffer_too_small(void) {
 }
 
 // ----------------------------------------------------------------------------
+// parseStatusRaw
+// ----------------------------------------------------------------------------
+void test_parse_status_raw_round_trip(void) {
+  uint8_t original[9] = {0x00, 0x01, 0x10, 0x09, 0x10, 0x90, 0x01, 0xAB, 0xFF};
+  char text[32];
+  snprintf(text, sizeof(text), "%02X %02X %02X %02X %02X %02X %02X %02X %02X",
+           original[0], original[1], original[2], original[3], original[4],
+           original[5], original[6], original[7], original[8]);
+
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_TRUE(parseStatusRaw(text, parsed));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, parsed, 9);
+}
+
+void test_parse_status_raw_lowercase(void) {
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_TRUE(parseStatusRaw("ab cd ef 00 11 22 33 44 55", parsed));
+  TEST_ASSERT_EQUAL_UINT8(0xAB, parsed[0]);
+  TEST_ASSERT_EQUAL_UINT8(0xEF, parsed[2]);
+}
+
+void test_parse_status_raw_too_few_bytes(void) {
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("00 00 00 00", parsed));
+}
+
+void test_parse_status_raw_trailing_garbage(void) {
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("00 00 00 00 00 00 00 00 00 00", parsed));
+}
+
+void test_parse_status_raw_non_hex(void) {
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("00 00 ZZ 00 00 00 00 00 00", parsed));
+}
+
+void test_parse_status_raw_leaves_out_untouched_on_failure(void) {
+  uint8_t parsed[9] = {0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
+  TEST_ASSERT_FALSE(parseStatusRaw("11 22 33 44 55 66 77 88 ZZ", parsed));
+  for (int i = 0; i < 9; i++) TEST_ASSERT_EQUAL_UINT8(0xEE, parsed[i]);
+}
+
+void test_parse_status_raw_empty_string(void) {
+  uint8_t parsed[9] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("", parsed));
+}
+
+// ----------------------------------------------------------------------------
 // Test runner
 // ----------------------------------------------------------------------------
 int main(int, char**) {
@@ -249,6 +297,14 @@ int main(int, char**) {
   RUN_TEST(test_json_get_value_present);
   RUN_TEST(test_json_get_value_missing_key);
   RUN_TEST(test_json_get_value_buffer_too_small);
+
+  RUN_TEST(test_parse_status_raw_round_trip);
+  RUN_TEST(test_parse_status_raw_lowercase);
+  RUN_TEST(test_parse_status_raw_too_few_bytes);
+  RUN_TEST(test_parse_status_raw_trailing_garbage);
+  RUN_TEST(test_parse_status_raw_non_hex);
+  RUN_TEST(test_parse_status_raw_leaves_out_untouched_on_failure);
+  RUN_TEST(test_parse_status_raw_empty_string);
 
   return UNITY_END();
 }

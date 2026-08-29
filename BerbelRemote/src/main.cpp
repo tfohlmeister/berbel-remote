@@ -514,6 +514,8 @@ void restoreStateFromMqtt(const char* json) {
     hood.nachlauf = (strcmp(val, "ON") == 0);
   if (berbel::jsonGetValue(json, "fan_preset", val, sizeof(val)))
     hood.fanSpeed = berbel::fanPresetToSpeed(val);
+  if (berbel::jsonGetValue(json, "status_raw", val, sizeof(val)))
+    berbel::parseStatusRaw(val, hood.raw);
 #if HOOD_HAS_COVER
   if (berbel::jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
