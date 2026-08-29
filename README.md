@@ -158,6 +158,8 @@ Services must be created in this exact order (hood validates):
 
 Raw `ADV_IND` with Flags + Service Data only. No device name, no HID UUID, no appearance. Service Data value must be `0x01` (active).
 
+NimBLE keeps no copy of custom advertising data, it only flags that custom data is in use. A NimBLE host reset therefore clears the payload in the controller and the library restarts advertising empty, which the hood no longer matches. The firmware re-applies the raw payload every 30 seconds while no hood is connected.
+
 ## How It Was Reverse Engineered
 
 1. Captured BLE traffic between the original remote and hood using an **nRF52840 Dongle** as a sniffer with **Wireshark/nRF Sniffer plugin**

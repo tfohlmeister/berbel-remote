@@ -130,6 +130,13 @@ NimBLECharacteristic* pNotifyChar = nullptr;
 volatile bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
+// The raw advertising payload lives only in the controller - NimBLE keeps no
+// copy of custom advertising data and does not re-apply it after a host reset,
+// which leaves the ESP32 advertising an empty payload the hood cannot match.
+// Re-assert it periodically while disconnected.
+#define ADV_REASSERT_MS 30000
+volatile unsigned long lastAdvReassert = 0;
+
 // WiFi/MQTT
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
@@ -195,8 +202,12 @@ void startAdvertising() {
   pAdvertising->setMinInterval(0x20);
   pAdvertising->setMaxInterval(0x40);
 
-  pAdvertising->start();
-  Serial.println("[BLE] Advertising started");
+  if (pAdvertising->start()) {
+    Serial.println("[BLE] Advertising started");
+  } else {
+    Serial.println("[BLE] Advertising start failed, retrying via watchdog");
+  }
+  lastAdvReassert = millis();
 }
 
 // ============================================================================
@@ -910,6 +921,11 @@ void loop() {
     }
     publishState();
     oldDeviceConnected = deviceConnected;
+  }
+
+  // --- Advertising watchdog ---
+  if (!deviceConnected && now - lastAdvReassert > ADV_REASSERT_MS) {
+    startAdvertising();
   }
 
   // --- Process command queue (spaced out button presses) ---
