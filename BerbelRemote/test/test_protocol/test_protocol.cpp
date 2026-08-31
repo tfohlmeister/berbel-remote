@@ -36,6 +36,7 @@ void test_decode_all_off(void) {
   DecodedStatus s = decodeHoodStatus(raw);
   TEST_ASSERT_FALSE(s.lightUp);
   TEST_ASSERT_FALSE(s.lightDown);
+  TEST_ASSERT_FALSE(s.lightCeiling);
   TEST_ASSERT_EQUAL_UINT8(0, s.fanSpeed);
   TEST_ASSERT_FALSE(s.nachlauf);
   TEST_ASSERT_FALSE(s.movingUp);
@@ -56,6 +57,45 @@ void test_decode_light_down(void) {
   DecodedStatus s = decodeHoodStatus(raw);
   TEST_ASSERT_FALSE(s.lightUp);
   TEST_ASSERT_TRUE(s.lightDown);
+}
+
+void test_decode_light_ceiling(void) {
+  uint8_t raw[9] = {0};
+  raw[5] = 0x01;  // Deckenlicht
+  DecodedStatus s = decodeHoodStatus(raw);
+  TEST_ASSERT_FALSE(s.lightUp);
+  TEST_ASSERT_FALSE(s.lightDown);
+  TEST_ASSERT_TRUE(s.lightCeiling);
+}
+
+void test_decode_all_three_lights(void) {
+  // Reported in issue #3 from a BFB 6bT (Skyline with lift) that has a ceiling
+  // connection, measured with all three lamps on. Confirmed on that hood only.
+  uint8_t raw[9] = {0x00, 0x00, 0x10, 0x00, 0x10, 0x01, 0x00, 0x00, 0x00};
+  DecodedStatus s = decodeHoodStatus(raw);
+  TEST_ASSERT_TRUE(s.lightUp);
+  TEST_ASSERT_TRUE(s.lightDown);
+  TEST_ASSERT_TRUE(s.lightCeiling);
+  TEST_ASSERT_EQUAL_UINT8(0, s.fanSpeed);
+  TEST_ASSERT_FALSE(s.nachlauf);
+}
+
+void test_decode_ceiling_light_independent_of_nachlauf(void) {
+  // raw[5] carries both Deckenlicht (bit 0) and Nachlauf (0x90); they must not
+  // interfere: 0x90 | 0x01 = 0x91 -> ceiling light AND afterrun.
+  uint8_t raw[9] = {0};
+  raw[5] = 0x91;
+  DecodedStatus s = decodeHoodStatus(raw);
+  TEST_ASSERT_TRUE(s.lightCeiling);
+  TEST_ASSERT_TRUE(s.nachlauf);
+}
+
+void test_decode_nachlauf_alone_leaves_ceiling_light_off(void) {
+  uint8_t raw[9] = {0};
+  raw[5] = 0x90;
+  DecodedStatus s = decodeHoodStatus(raw);
+  TEST_ASSERT_FALSE(s.lightCeiling);
+  TEST_ASSERT_TRUE(s.nachlauf);
 }
 
 // ----------------------------------------------------------------------------
@@ -274,6 +314,10 @@ int main(int, char**) {
   RUN_TEST(test_decode_all_off);
   RUN_TEST(test_decode_light_up);
   RUN_TEST(test_decode_light_down);
+  RUN_TEST(test_decode_light_ceiling);
+  RUN_TEST(test_decode_all_three_lights);
+  RUN_TEST(test_decode_ceiling_light_independent_of_nachlauf);
+  RUN_TEST(test_decode_nachlauf_alone_leaves_ceiling_light_off);
   RUN_TEST(test_decode_fan_stufe_1);
   RUN_TEST(test_decode_fan_stufe_2);
   RUN_TEST(test_decode_fan_stufe_3);

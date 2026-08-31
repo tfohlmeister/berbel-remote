@@ -21,12 +21,14 @@
  *   Byte[2] & 0x10  = Oberlicht (upper light)
  *   Byte[4] & 0x10  = Unterlicht (lower light)
  *   Byte[4] & 0x01  = Cover moving up (retracting)
+ *   Byte[5] & 0x01  = Deckenlicht (ceiling connection light)
  *   Byte[5] & 0x90  = Nachlauf (afterrun timer active)
  *   Byte[6] & 0x01  = Cover moving down (deploying)
  *
  * HA Entities (via MQTT Auto-Discovery):
  *   - Oberlicht       (light)          Toggle upper light
  *   - Unterlicht      (light)          Toggle lower light
+ *   - Deckenlicht     (light)          Toggle ceiling connection light (only with HOOD_HAS_CEILING_LIGHT)
  *   - Luefter         (select)         Fan speed: Aus, Stufe 1-3, Power
  *   - Ausschalten     (button)         Power off (starts Nachlauf)
  *   - Nachlauf        (switch)         Toggle afterrun timer
@@ -57,6 +59,13 @@
 #include "config.h"
 #include "berbel_protocol.h"
 
+// Feature flags added after the initial release. A config.h from an older
+// checkout does not define them, so default them to off here rather than
+// relying on the preprocessor treating the unknown name as 0.
+#ifndef HOOD_HAS_CEILING_LIGHT
+#define HOOD_HAS_CEILING_LIGHT false
+#endif
+
 // ============================================================================
 // Berbel Custom Service UUIDs
 // ============================================================================
@@ -65,7 +74,7 @@
 #define BERBEL_WRITE_UUID     "f004f001-5745-4053-8043-62657262656c"  // Status from hood
 
 // ============================================================================
-// Button Codes
+// Button Codes (named after the function in the Berbel BFB 6bT manual)
 // ============================================================================
 #define BTN_POWER       0x01
 #define BTN_FAN_1       0x02
@@ -73,11 +82,11 @@
 #define BTN_FAN_3       0x04
 #define BTN_FAN_P       0x05
 #define BTN_LIGHT_UP    0x06
-#define BTN_PLAY        0x07
-#define BTN_RELOAD      0x08
+#define BTN_SYNC        0x07
+#define BTN_RECIRC      0x08
 #define BTN_MOVE_UP     0x09
 #define BTN_LIGHT_DOWN  0x0A
-#define BTN_RECORD      0x0B
+#define BTN_MULTI       0x0B  // multifunction, drives the ceiling connection light
 #define BTN_TIMER       0x0C
 #define BTN_MOVE_DOWN   0x0D
 
@@ -89,6 +98,9 @@
 #define MQTT_STATE          MQTT_BASE "/state"
 #define MQTT_CMD_LIGHT_UP   MQTT_BASE "/light_up/set"
 #define MQTT_CMD_LIGHT_DOWN MQTT_BASE "/light_down/set"
+#if HOOD_HAS_CEILING_LIGHT
+#define MQTT_CMD_LIGHT_CEILING MQTT_BASE "/light_ceiling/set"
+#endif
 #define MQTT_CMD_FAN_PRESET MQTT_BASE "/fan/preset/set"
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
 #define MQTT_CMD_NACHLAUF   MQTT_BASE "/nachlauf/set"
@@ -105,6 +117,9 @@
 struct HoodState {
   bool lightUp = false;
   bool lightDown = false;
+#if HOOD_HAS_CEILING_LIGHT
+  bool lightCeiling = false;
+#endif
   uint8_t fanSpeed = 0;  // 0=off, 1-4
   bool nachlauf = false;  // timer/afterrun active
 #if HOOD_HAS_COVER
@@ -317,6 +332,9 @@ void publishState() {
     "{"
     "\"light_up\":\"%s\","
     "\"light_down\":\"%s\","
+#if HOOD_HAS_CEILING_LIGHT
+    "\"light_ceiling\":\"%s\","
+#endif
     "\"fan_preset\":\"%s\","
     "\"nachlauf\":\"%s\","
 #if HOOD_HAS_COVER
@@ -328,6 +346,9 @@ void publishState() {
     "}",
     hood.lightUp ? "ON" : "OFF",
     hood.lightDown ? "ON" : "OFF",
+#if HOOD_HAS_CEILING_LIGHT
+    hood.lightCeiling ? "ON" : "OFF",
+#endif
     berbel::fanPresetName(hood.fanSpeed),
     hood.nachlauf ? "ON" : "OFF",
 #if HOOD_HAS_COVER
@@ -363,6 +384,11 @@ void cleanupOldDiscovery() {
     "homeassistant/fan/berbel_hood/fan/config",
     "homeassistant/binary_sensor/berbel_hood/nachlauf/config",
     "homeassistant/cover/berbel_hood/cover/config",
+#if !HOOD_HAS_CEILING_LIGHT
+    // Feature disabled again: drop the entity a previous build registered,
+    // otherwise it lingers in HA as a toggle nothing listens to.
+    "homeassistant/light/berbel_hood/light_ceiling/config",
+#endif
     nullptr
   };
   for (int i = 0; oldTopics[i] != nullptr; i++) {
@@ -396,6 +422,19 @@ void publishDiscovery() {
     "\"stat_val_tpl\":\"{{ value_json.light_down }}\","
     "\"ic\":\"mdi:desk-lamp\""
   );
+
+#if HOOD_HAS_CEILING_LIGHT
+  // Deckenlicht (ceiling connection with effect lighting)
+  publishDiscoveryMsg(
+    "homeassistant/light/berbel_hood/light_ceiling/config",
+    "\"name\":\"Deckenlicht\","
+    "\"uniq_id\":\"berbel_light_ceiling\","
+    "\"stat_t\":\"" MQTT_STATE "\","
+    "\"cmd_t\":\"" MQTT_CMD_LIGHT_CEILING "\","
+    "\"stat_val_tpl\":\"{{ value_json.light_ceiling }}\","
+    "\"ic\":\"mdi:led-strip-variant\""
+  );
+#endif
 
   // Fan (Luefter) - select entity for 5 speed levels
   publishDiscoveryMsg(
@@ -510,6 +549,10 @@ void restoreStateFromMqtt(const char* json) {
     hood.lightUp = (strcmp(val, "ON") == 0);
   if (berbel::jsonGetValue(json, "light_down", val, sizeof(val)))
     hood.lightDown = (strcmp(val, "ON") == 0);
+#if HOOD_HAS_CEILING_LIGHT
+  if (berbel::jsonGetValue(json, "light_ceiling", val, sizeof(val)))
+    hood.lightCeiling = (strcmp(val, "ON") == 0);
+#endif
   if (berbel::jsonGetValue(json, "nachlauf", val, sizeof(val)))
     hood.nachlauf = (strcmp(val, "ON") == 0);
   if (berbel::jsonGetValue(json, "fan_preset", val, sizeof(val)))
@@ -575,6 +618,17 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     queueButton(BTN_LIGHT_DOWN, "Light Down");
   }
+#if HOOD_HAS_CEILING_LIGHT
+  // Deckenlicht - TOGGLE: check state before sending
+  else if (t == MQTT_CMD_LIGHT_CEILING) {
+    bool wantOn = (strcmp(msg, "ON") == 0);
+    if (wantOn == hood.lightCeiling) {
+      Serial.printf("[MQTT] Deckenlicht already %s, skipping\n", msg);
+      return;
+    }
+    queueButton(BTN_MULTI, "Light Ceiling");
+  }
+#endif
   // Power button (Ausschalten)
   else if (t == MQTT_CMD_POWER) {
     queueButton(BTN_POWER, "Power Off");
@@ -700,6 +754,9 @@ void mqttReconnect() {
 
     mqtt.subscribe(MQTT_CMD_LIGHT_UP);
     mqtt.subscribe(MQTT_CMD_LIGHT_DOWN);
+#if HOOD_HAS_CEILING_LIGHT
+    mqtt.subscribe(MQTT_CMD_LIGHT_CEILING);
+#endif
     mqtt.subscribe(MQTT_CMD_POWER);
     mqtt.subscribe(MQTT_CMD_NACHLAUF);
     mqtt.subscribe(MQTT_CMD_FAN_PRESET);
@@ -947,6 +1004,9 @@ void loop() {
       berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw);
       hood.lightUp   = status.lightUp;
       hood.lightDown = status.lightDown;
+#if HOOD_HAS_CEILING_LIGHT
+      hood.lightCeiling = status.lightCeiling;
+#endif
       hood.fanSpeed  = status.fanSpeed;
       hood.nachlauf  = status.nachlauf;
 
