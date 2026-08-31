@@ -15,3 +15,9 @@
 // When false, Position, Hochfahren, Herunterfahren, and Cover State
 // entities will not be created in Home Assistant.
 #define HOOD_HAS_COVER true
+
+// Set to true if your hood has a ceiling connection with effect lighting
+// ("Deckenanschluss mit Effektbeleuchtung"), the optional third lamp driven
+// by the multifunction button. When false, the Deckenlicht entity will not
+// be created in Home Assistant.
+#define HOOD_HAS_CEILING_LIGHT false

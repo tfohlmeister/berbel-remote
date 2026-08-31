@@ -16,12 +16,13 @@ namespace berbel {
 
 // Decoded view of a 9-byte hood status notification.
 struct DecodedStatus {
-  bool lightUp = false;     // Oberlicht
-  bool lightDown = false;   // Unterlicht
-  uint8_t fanSpeed = 0;     // 0=off, 1-3=Stufe, 4=Power
-  bool nachlauf = false;    // afterrun timer active
-  bool movingUp = false;    // cover retracting
-  bool movingDown = false;  // cover deploying
+  bool lightUp = false;       // Oberlicht
+  bool lightDown = false;     // Unterlicht
+  bool lightCeiling = false;  // Deckenlicht (ceiling connection, optional accessory)
+  uint8_t fanSpeed = 0;       // 0=off, 1-3=Stufe, 4=Power
+  bool nachlauf = false;      // afterrun timer active
+  bool movingUp = false;      // cover retracting
+  bool movingDown = false;    // cover deploying
 };
 
 // Hood sends an all-0x11 sync packet on connect that carries no real state.
@@ -37,8 +38,11 @@ inline DecodedStatus decodeHoodStatus(const uint8_t raw[9]) {
   DecodedStatus s;
 
   // Lights (bits don't overlap with fan)
-  s.lightUp = (raw[2] & 0x10) != 0;    // Oberlicht: byte 2, bit 4
-  s.lightDown = (raw[4] & 0x10) != 0;  // Unterlicht: byte 4, bit 4
+  s.lightUp = (raw[2] & 0x10) != 0;       // Oberlicht: byte 2, bit 4
+  s.lightDown = (raw[4] & 0x10) != 0;     // Unterlicht: byte 4, bit 4
+  // Deckenlicht: byte 5, bit 0. Shares the byte with Nachlauf (0x90) but no bits
+  // overlap. Confirmed on a single hood (issue #3), unverified elsewhere.
+  s.lightCeiling = (raw[5] & 0x01) != 0;
 
   // Fan speed (only one active at a time)
   if (raw[2] & 0x09)      s.fanSpeed = 4;  // Power:   0000 1001

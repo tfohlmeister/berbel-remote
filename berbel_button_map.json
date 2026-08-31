@@ -12,19 +12,84 @@
     "release_format": "00 00"
   },
   "buttons": {
-    "0x01": { "code": 1, "hex": "01 00", "label": "power", "description": "Power ON/OFF" },
-    "0x02": { "code": 2, "hex": "02 00", "label": "fan_1", "description": "Fan Level 1" },
-    "0x03": { "code": 3, "hex": "03 00", "label": "fan_2", "description": "Fan Level 2" },
-    "0x04": { "code": 4, "hex": "04 00", "label": "fan_3", "description": "Fan Level 3" },
-    "0x05": { "code": 5, "hex": "05 00", "label": "fan_p", "description": "Fan Power Level (P)" },
-    "0x06": { "code": 6, "hex": "06 00", "label": "light_up", "description": "Light Up Toggle" },
-    "0x07": { "code": 7, "hex": "07 00", "label": "play", "description": "Play" },
-    "0x08": { "code": 8, "hex": "08 00", "label": "reload", "description": "Reload" },
-    "0x09": { "code": 9, "hex": "09 00", "label": "move_up", "description": "Move Up" },
-    "0x0a": { "code": 10, "hex": "0a 00", "label": "light_down", "description": "Light Down Toggle" },
-    "0x0b": { "code": 11, "hex": "0b 00", "label": "record", "description": "Record" },
-    "0x0c": { "code": 12, "hex": "0c 00", "label": "timer", "description": "Timer" },
-    "0x0d": { "code": 13, "hex": "0d 00", "label": "move_down", "description": "Move Down" }
+    "0x01": {
+      "code": 1,
+      "hex": "01 00",
+      "label": "power",
+      "description": "EIN/AUS"
+    },
+    "0x02": {
+      "code": 2,
+      "hex": "02 00",
+      "label": "fan_1",
+      "description": "Leistungsstufe 1"
+    },
+    "0x03": {
+      "code": 3,
+      "hex": "03 00",
+      "label": "fan_2",
+      "description": "Leistungsstufe 2"
+    },
+    "0x04": {
+      "code": 4,
+      "hex": "04 00",
+      "label": "fan_3",
+      "description": "Leistungsstufe 3"
+    },
+    "0x05": {
+      "code": 5,
+      "hex": "05 00",
+      "label": "fan_p",
+      "description": "Leistungsstufe POWER"
+    },
+    "0x06": {
+      "code": 6,
+      "hex": "06 00",
+      "label": "light_up",
+      "description": "Effektbeleuchtung (Oberlicht)"
+    },
+    "0x07": {
+      "code": 7,
+      "hex": "07 00",
+      "label": "sync",
+      "description": "Synchronisation"
+    },
+    "0x08": {
+      "code": 8,
+      "hex": "08 00",
+      "label": "recirc",
+      "description": "Umluftbetrieb / Kontrollanzeige Filter-Füllung"
+    },
+    "0x09": {
+      "code": 9,
+      "hex": "09 00",
+      "label": "move_up",
+      "description": "Liftfunktion \"Heben\""
+    },
+    "0x0a": {
+      "code": 10,
+      "hex": "0a 00",
+      "label": "light_down",
+      "description": "Kochfeld-Beleuchtung (Unterlicht)"
+    },
+    "0x0b": {
+      "code": 11,
+      "hex": "0b 00",
+      "label": "multi",
+      "description": "Multifunktionstaste (e.g. Deckenanschluss mit Effektbeleuchtung)"
+    },
+    "0x0c": {
+      "code": 12,
+      "hex": "0c 00",
+      "label": "timer",
+      "description": "Nachlauffunktion"
+    },
+    "0x0d": {
+      "code": 13,
+      "hex": "0d 00",
+      "label": "move_down",
+      "description": "Liftfunktion \"Senken\""
+    }
   },
   "buttons_by_label": {
     "power": 1,
@@ -33,14 +98,14 @@
     "fan_3": 4,
     "fan_p": 5,
     "light_up": 6,
-    "play": 7,
-    "reload": 8,
+    "sync": 7,
+    "recirc": 8,
     "move_up": 9,
     "light_down": 10,
-    "record": 11,
+    "multi": 11,
     "timer": 12,
     "move_down": 13
   },
   "capture_date": "2026-01-03",
-  "notes": "Complete button mapping for Berbel Skyline Frame remote control. 13 buttons, codes 0x01-0x0D."
+  "notes": "Complete button mapping for the Berbel BFB 6bT remote control, 13 buttons, codes 0x01-0x0D. The codes are reverse engineered; the function names come from the Berbel manual 6005229_0, which does not publish the codes. The light assignment was confirmed on real hoods and is the reverse of the manual's function-table order, so 0x07 and 0x08 (assigned by elimination) may still be swapped. Which functions a button performs depends on the hood's equipment."
 }

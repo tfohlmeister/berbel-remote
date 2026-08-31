@@ -49,7 +49,12 @@ The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**,
    cp src/config.example.h src/config.h
    ```
 
-2. **Edit `src/config.h`** with your WiFi and MQTT credentials. If your hood has no retractable cover (lift function), set `HOOD_HAS_COVER` to `false` to disable the Position, Hochfahren, Herunterfahren, and Cover State entities.
+2. **Edit `src/config.h`** with your WiFi and MQTT credentials, then match the two feature flags to your hood:
+
+   | Flag | Default | Set it when |
+   |------|---------|-------------|
+   | `HOOD_HAS_COVER` | `true` | Your hood has no retractable cover (lift function): set `false` to drop the Position, Hochfahren, Herunterfahren and Cover State entities. |
+   | `HOOD_HAS_CEILING_LIGHT` | `false` | Your hood has a ceiling connection with effect lighting (a third lamp): set `true` to add the Deckenlicht entity. |
 
 3. **Build and flash:**
    ```bash
@@ -75,6 +80,7 @@ All entities are created automatically via MQTT auto-discovery.
 |--------|------|-------------|
 | Oberlicht | Light | Upper/effect light toggle |
 | Unterlicht | Light | Cooktop light toggle |
+| Deckenlicht | Light | Ceiling connection light toggle *(`HOOD_HAS_CEILING_LIGHT` only)* |
 | Lufter | Select | Fan speed: Aus, Stufe 1-3, Power |
 | Ausschalten | Button | Power off (starts afterrun timer) |
 | Nachlauf | Switch | Toggle afterrun timer |
@@ -87,23 +93,26 @@ All entities are created automatically via MQTT auto-discovery.
 
 ## Button Codes
 
-Complete mapping of all 13 buttons on the BFB 6bT remote control, with official function names from the Berbel manual.
+Complete mapping of all 13 buttons on the BFB 6bT remote control. The codes themselves are reverse engineered,
+the function names come from the Berbel manual (document 6005229_0). Codes marked as verified were confirmed by
+driving them on a real hood; the rest are assigned by elimination and may still be swapped. Whether a hood
+performs a function at all depends on its equipment.
 
-| Code | Remote Label | Official Function (Berbel Manual) |
-|------|-------------|-----------------------------------|
-| 0x01 | Power | EIN/AUS |
-| 0x02 | Fan 1 | Leistungsstufe 1 |
-| 0x03 | Fan 2 | Leistungsstufe 2 |
-| 0x04 | Fan 3 | Leistungsstufe 3 |
-| 0x05 | Fan P | Leistungsstufe POWER |
-| 0x06 | Cooktop Light | Kochfeld-Beleuchtung |
-| 0x07 | Sync | Synchronisation |
-| 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter |
-| 0x09 | Raise | Liftfunktion "Heben" |
-| 0x0A | Effect Light | Effektbeleuchtung |
-| 0x0B | Multi | Multifunktionstaste |
-| 0x0C | Afterrun | Nachlauffunktion |
-| 0x0D | Lower | Liftfunktion "Senken" |
+| Code | Function | Berbel Manual Term | Verified |
+|------|----------|--------------------|----------|
+| 0x01 | Power | EIN/AUS | yes |
+| 0x02 | Fan 1 | Leistungsstufe 1 | yes |
+| 0x03 | Fan 2 | Leistungsstufe 2 | yes |
+| 0x04 | Fan 3 | Leistungsstufe 3 | yes |
+| 0x05 | Fan P | Leistungsstufe POWER | yes |
+| 0x06 | Effect Light (Oberlicht) | Effektbeleuchtung | yes |
+| 0x07 | Sync | Synchronisation | no, by elimination |
+| 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter | no, by elimination |
+| 0x09 | Raise | Liftfunktion "Heben" | yes |
+| 0x0A | Cooktop Light (Unterlicht) | Kochfeld-Beleuchtung | yes |
+| 0x0B | Ceiling Light | Multifunktionstaste (e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
+| 0x0C | Afterrun | Nachlauffunktion | yes |
+| 0x0D | Lower | Liftfunktion "Senken" | yes |
 
 Protocol: 2-byte notifications on characteristic `f004f002-...-berbel`. Press: `[code, 0x00]`, Release: `[0x00, 0x00]`.
 
@@ -120,6 +129,7 @@ The hood sends 9-byte status packets on characteristic `f004f001-...-berbel`. Al
 | [2] | 0x10 | Oberlicht (upper light) |
 | [4] | 0x10 | Unterlicht (cooktop light) |
 | [4] | 0x01 | Cover moving up (retracting) *(`HOOD_HAS_COVER` only)* |
+| [5] | 0x01 | Deckenlicht (ceiling connection light) *(`HOOD_HAS_CEILING_LIGHT` only)* |
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
 | [6] | 0x01 | Cover moving down (deploying) *(`HOOD_HAS_COVER` only)* |
 
