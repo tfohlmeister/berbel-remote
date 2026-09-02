@@ -80,6 +80,15 @@ The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**,
    pio device monitor
    ```
 
+   Without a cable, turn on the **Remote Log** switch in Home Assistant and the
+   same output is published to MQTT:
+   ```bash
+   mosquitto_sub -h <broker> -u <user> -P <pass> -t 'berbel/hood/log'
+   ```
+   The switch is retained, so it stays on across a reboot, which is what makes it
+   useful for catching a crash or a BLE dropout. Set `REMOTE_LOG_DEFAULT true` in
+   `config.h` to have it on from the first boot.
+
 ## Home Assistant Entities
 
 All entities are created automatically via MQTT auto-discovery.
@@ -98,6 +107,7 @@ All entities are created automatically via MQTT auto-discovery.
 | BLE Verbindung | Binary Sensor | BLE connection status (diagnostic) |
 | Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_COVER` only)* |
 | Status Raw | Sensor | Raw 9-byte hex for debugging (diagnostic) |
+| Remote Log | Switch | Mirror the firmware log to MQTT (diagnostic) |
 
 ## Button Codes
 

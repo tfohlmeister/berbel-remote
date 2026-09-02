@@ -66,6 +66,12 @@
 #define HOOD_HAS_CEILING_LIGHT false
 #endif
 
+// Whether remote logging starts enabled. The retained MQTT state overrides this
+// on boot, so a device that was switched on stays on across a reboot.
+#ifndef REMOTE_LOG_DEFAULT
+#define REMOTE_LOG_DEFAULT false
+#endif
+
 // ============================================================================
 // Berbel Custom Service UUIDs
 // ============================================================================
@@ -110,6 +116,9 @@
 #define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
 #endif
 #define MQTT_CMD_DEBUG      MQTT_BASE "/debug/send"
+#define MQTT_LOG            MQTT_BASE "/log"
+#define MQTT_LOG_STATE      MQTT_BASE "/log/state"
+#define MQTT_CMD_LOG        MQTT_BASE "/log/set"
 
 // ============================================================================
 // Hood State
@@ -183,6 +192,131 @@ int cmdQueueTail = 0;
 unsigned long lastCmdSent = 0;
 
 // ============================================================================
+// Logging
+// ============================================================================
+// Log through `Log` rather than `Serial`: it writes to the serial console and,
+// when remote logging is on, queues the line for MQTT. The queue exists because
+// most log lines are written from the NimBLE host task, while PubSubClient may
+// only be touched from loop().
+#define LOG_LINE_MAX 160
+#define LOG_QUEUE_SIZE 24
+
+volatile bool remoteLogEnabled = REMOTE_LOG_DEFAULT;
+bool logStateRestored = false;
+unsigned long mqttConnectedAt = 0;
+
+static char logLines[LOG_QUEUE_SIZE][LOG_LINE_MAX];
+static volatile uint8_t logHead = 0;    // next slot to fill
+static volatile uint8_t logTail = 0;    // next slot to publish
+static volatile uint16_t logDropped = 0;
+static portMUX_TYPE logMux = portMUX_INITIALIZER_UNLOCKED;
+
+class LogStream : public Print {
+public:
+  size_t write(uint8_t c) override { return write(&c, 1); }
+
+  size_t write(const uint8_t* data, size_t len) override {
+    Serial.write(data, len);
+    if (!remoteLogEnabled) return len;
+
+    // A log line is often several write() calls and the lock is released
+    // between them, so close the pending line whenever the writer changes.
+    // Without this, a status dump from the BLE task and a heap line from
+    // loop() interleave into one unreadable line.
+    TaskHandle_t writer = xTaskGetCurrentTaskHandle();
+
+    portENTER_CRITICAL(&logMux);
+    if (m_partialLen > 0 && writer != m_owner) queueLine();
+    m_owner = writer;
+
+    for (size_t i = 0; i < len; i++) {
+      char c = (char)data[i];
+      // \r ends a line too: progress output that only ever returns the cursor
+      // would otherwise fill the buffer until the rest is silently dropped.
+      if (c == '\n' || c == '\r') {
+        queueLine();
+      } else if (m_partialLen < LOG_LINE_MAX - 1) {
+        m_partial[m_partialLen++] = c;
+      }
+    }
+    portEXIT_CRITICAL(&logMux);
+    return len;
+  }
+
+  // Caller holds logMux. Drops a half-written line so switching remote logging
+  // back on does not start with the tail of an old one.
+  void discardPartial() { m_partialLen = 0; }
+
+private:
+  char m_partial[LOG_LINE_MAX];
+  size_t m_partialLen = 0;
+  TaskHandle_t m_owner = nullptr;
+
+  // Caller holds logMux.
+  void queueLine() {
+    if (m_partialLen == 0) return;
+    m_partial[m_partialLen] = '\0';
+    uint8_t next = (logHead + 1) % LOG_QUEUE_SIZE;
+    if (next == logTail) {
+      logDropped++;
+    } else {
+      memcpy(logLines[logHead], m_partial, m_partialLen + 1);
+      logHead = next;
+    }
+    m_partialLen = 0;
+  }
+};
+
+LogStream Log;
+
+// Must not log through Log itself, that would feed the queue it is draining.
+void publishPendingLogs() {
+  if (!mqtt.connected()) return;
+
+  for (int i = 0; i < LOG_QUEUE_SIZE && logTail != logHead; i++) {
+    char line[LOG_LINE_MAX];
+    portENTER_CRITICAL(&logMux);
+    memcpy(line, logLines[logTail], LOG_LINE_MAX);
+    logTail = (logTail + 1) % LOG_QUEUE_SIZE;
+    portEXIT_CRITICAL(&logMux);
+    mqtt.publish(MQTT_LOG, line);
+  }
+
+  if (logDropped > 0) {
+    char note[64];
+    portENTER_CRITICAL(&logMux);
+    uint16_t n = logDropped;
+    logDropped = 0;
+    portEXIT_CRITICAL(&logMux);
+    snprintf(note, sizeof(note), "[LOG] %u lines dropped, queue was full", n);
+    mqtt.publish(MQTT_LOG, note);
+  }
+}
+
+// The state topic is retained and we publish to it ourselves, so stop listening
+// once the setting is settled, otherwise our own publish comes back as a command.
+void stopLogStateRestore() {
+  if (logStateRestored) return;
+  logStateRestored = true;
+  mqtt.unsubscribe(MQTT_LOG_STATE);
+}
+
+void setRemoteLog(bool on) {
+  if (!on) {
+    // Switching off usually follows something interesting, so send what is
+    // still queued before going quiet.
+    remoteLogEnabled = false;
+    publishPendingLogs();
+    portENTER_CRITICAL(&logMux);
+    Log.discardPartial();
+    portEXIT_CRITICAL(&logMux);
+  } else {
+    remoteLogEnabled = true;
+  }
+  if (mqtt.connected()) mqtt.publish(MQTT_LOG_STATE, on ? "ON" : "OFF", true);
+}
+
+// ============================================================================
 // Raw Advertising Data (must match real remote exactly!)
 // ============================================================================
 static uint8_t raw_adv_data[] = {
@@ -222,9 +356,9 @@ void startAdvertising() {
   pAdvertising->setMaxInterval(0x40);
 
   if (pAdvertising->start()) {
-    Serial.println("[BLE] Advertising started");
+    Log.println("[BLE] Advertising started");
   } else {
-    Serial.println("[BLE] Advertising start failed, retrying via watchdog");
+    Log.println("[BLE] Advertising start failed, retrying via watchdog");
   }
   lastAdvReassert = millis();
 }
@@ -253,15 +387,15 @@ static const char* hciReasonName(int code) {
 static void logGapStatus(const char* what, int status) {
   if (status >= BLE_HS_ERR_HCI_BASE && status < BLE_HS_ERR_L2C_BASE) {
     int code = status - BLE_HS_ERR_HCI_BASE;
-    Serial.printf("[BLE] %s: HCI 0x%02X - %s\n", what, code, hciReasonName(code));
+    Log.printf("[BLE] %s: HCI 0x%02X - %s\n", what, code, hciReasonName(code));
   } else if (status >= BLE_HS_ERR_SM_US_BASE && status < BLE_HS_ERR_SM_PEER_BASE) {
-    Serial.printf("[BLE] %s: local pairing error 0x%02X\n",
+    Log.printf("[BLE] %s: local pairing error 0x%02X\n",
                   what, status - BLE_HS_ERR_SM_US_BASE);
   } else if (status >= BLE_HS_ERR_SM_PEER_BASE && status < BLE_HS_ERR_HW_BASE) {
-    Serial.printf("[BLE] %s: pairing rejected by the hood, error 0x%02X\n",
+    Log.printf("[BLE] %s: pairing rejected by the hood, error 0x%02X\n",
                   what, status - BLE_HS_ERR_SM_PEER_BASE);
   } else {
-    Serial.printf("[BLE] %s: host status %d\n", what, status);
+    Log.printf("[BLE] %s: host status %d\n", what, status);
   }
 }
 
@@ -287,23 +421,23 @@ static int gapEventLogger(ble_gap_event* event, void* arg) {
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer) override {
     deviceConnected = true;
-    Serial.println("[BLE] Hood connected!");
+    Log.println("[BLE] Hood connected!");
   }
 
   void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) override {
-    Serial.printf("[BLE] Peer %s, encrypted=%d bonded=%d\n",
+    Log.printf("[BLE] Peer %s, encrypted=%d bonded=%d\n",
                   NimBLEAddress(desc->peer_ota_addr).toString().c_str(),
                   desc->sec_state.encrypted, desc->sec_state.bonded);
   }
 
   void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
-    Serial.printf("[BLE] Authentication complete: encrypted=%d bonded=%d\n",
+    Log.printf("[BLE] Authentication complete: encrypted=%d bonded=%d\n",
                   desc->sec_state.encrypted, desc->sec_state.bonded);
   }
 
   void onDisconnect(NimBLEServer* pServer) override {
     deviceConnected = false;
-    Serial.println("[BLE] Hood disconnected");
+    Log.println("[BLE] Hood disconnected");
     delay(100);
     startAdvertising();
   }
@@ -312,11 +446,11 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 class WriteCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* pChar) override {
     std::string value = pChar->getValue();
-    Serial.printf("[HOOD] Status (%d bytes): ", value.length());
+    Log.printf("[HOOD] Status (%d bytes): ", value.length());
     for (size_t i = 0; i < value.length(); i++) {
-      Serial.printf("%02X ", (uint8_t)value[i]);
+      Log.printf("%02X ", (uint8_t)value[i]);
     }
-    Serial.println();
+    Log.println();
 
     if (value.length() == 9) {
       memcpy(pendingStatus, (const uint8_t*)value.data(), 9);
@@ -330,11 +464,11 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 // ============================================================================
 void sendButton(uint8_t code, const char* name) {
   if (!deviceConnected || !pNotifyChar) {
-    Serial.printf("[BTN] Cannot send %s - not connected\n", name);
+    Log.printf("[BTN] Cannot send %s - not connected\n", name);
     return;
   }
 
-  Serial.printf("[BTN] Sending: %s (0x%02X)\n", name, code);
+  Log.printf("[BTN] Sending: %s (0x%02X)\n", name, code);
 
   uint8_t press[] = {code, 0x00};
   pNotifyChar->setValue(press, 2);
@@ -353,7 +487,7 @@ void sendButton(uint8_t code, const char* name) {
 void queueButton(uint8_t code, const char* name) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next == cmdQueueTail) {
-    Serial.printf("[CMD] Queue full, dropping: %s\n", name);
+    Log.printf("[CMD] Queue full, dropping: %s\n", name);
     return;
   }
   cmdQueue[cmdQueueHead].code = code;
@@ -361,7 +495,7 @@ void queueButton(uint8_t code, const char* name) {
   cmdQueue[cmdQueueHead].name[sizeof(cmdQueue[cmdQueueHead].name) - 1] = '\0';
   cmdQueueHead = next;
   int pending = (cmdQueueHead - cmdQueueTail + CMD_QUEUE_SIZE) % CMD_QUEUE_SIZE;
-  Serial.printf("[CMD] Queued: %s (0x%02X), pending: %d\n", name, code, pending);
+  Log.printf("[CMD] Queued: %s (0x%02X), pending: %d\n", name, code, pending);
 }
 
 void processCmdQueue() {
@@ -465,7 +599,7 @@ void cleanupOldDiscovery() {
 }
 
 void publishDiscovery() {
-  Serial.println("[MQTT] Publishing HA discovery...");
+  Log.println("[MQTT] Publishing HA discovery...");
   cleanupOldDiscovery();
 
   // Light Up (Oberlicht)
@@ -540,6 +674,17 @@ void publishDiscovery() {
     "\"ent_cat\":\"diagnostic\""
   );
 
+  // Remote logging (diagnostic)
+  publishDiscoveryMsg(
+    "homeassistant/switch/berbel_hood/remote_log/config",
+    "\"name\":\"Remote Log\","
+    "\"uniq_id\":\"berbel_remote_log\","
+    "\"stat_t\":\"" MQTT_LOG_STATE "\","
+    "\"cmd_t\":\"" MQTT_CMD_LOG "\","
+    "\"ent_cat\":\"diagnostic\","
+    "\"ic\":\"mdi:text-box-search-outline\""
+  );
+
   // Power button (Ausschalten / Nachlauf starten)
   publishDiscoveryMsg(
     "homeassistant/button/berbel_hood/power/config",
@@ -603,7 +748,7 @@ void publishDiscovery() {
   );
 
   discoveryPublished = true;
-  Serial.println("[MQTT] Discovery published!");
+  Log.println("[MQTT] Discovery published!");
 }
 
 // ============================================================================
@@ -640,10 +785,10 @@ void restoreStateFromMqtt(const char* json) {
   hoodStateValid = true;
   mqtt.unsubscribe(MQTT_STATE);
 #if HOOD_HAS_COVER
-  Serial.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d pos=%s\n",
+  Log.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d pos=%s\n",
     hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf, hood.position);
 #else
-  Serial.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d\n",
+  Log.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d\n",
     hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf);
 #endif
 }
@@ -657,7 +802,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   memcpy(msg, payload, copyLen);
   msg[copyLen] = '\0';
 
-  Serial.printf("[MQTT] %s = %s\n", topic, msg);
+  Log.printf("[MQTT] %s = %s\n", topic, msg);
 
   String t(topic);
 
@@ -667,11 +812,21 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     return;
   }
 
+  // Same for the log switch, so it stays on across the reboot we want logged
+  if (t == MQTT_LOG_STATE) {
+    if (!logStateRestored) {
+      stopLogStateRestore();
+      setRemoteLog(strcmp(msg, "ON") == 0);
+      Log.printf("[LOG] Remote logging restored: %s\n", remoteLogEnabled ? "on" : "off");
+    }
+    return;
+  }
+
   // Light Up (Oberlicht) - TOGGLE: check state before sending
   if (t == MQTT_CMD_LIGHT_UP) {
     bool wantOn = (strcmp(msg, "ON") == 0);
     if (wantOn == hood.lightUp) {
-      Serial.printf("[MQTT] Oberlicht already %s, skipping\n", msg);
+      Log.printf("[MQTT] Oberlicht already %s, skipping\n", msg);
       return;
     }
     queueButton(BTN_LIGHT_UP, "Light Up");
@@ -680,7 +835,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   else if (t == MQTT_CMD_LIGHT_DOWN) {
     bool wantOn = (strcmp(msg, "ON") == 0);
     if (wantOn == hood.lightDown) {
-      Serial.printf("[MQTT] Unterlicht already %s, skipping\n", msg);
+      Log.printf("[MQTT] Unterlicht already %s, skipping\n", msg);
       return;
     }
     queueButton(BTN_LIGHT_DOWN, "Light Down");
@@ -690,7 +845,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   else if (t == MQTT_CMD_LIGHT_CEILING) {
     bool wantOn = (strcmp(msg, "ON") == 0);
     if (wantOn == hood.lightCeiling) {
-      Serial.printf("[MQTT] Deckenlicht already %s, skipping\n", msg);
+      Log.printf("[MQTT] Deckenlicht already %s, skipping\n", msg);
       return;
     }
     queueButton(BTN_MULTI, "Light Ceiling");
@@ -704,7 +859,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   else if (t == MQTT_CMD_NACHLAUF) {
     bool wantOn = (strcmp(msg, "ON") == 0);
     if (wantOn == hood.nachlauf) {
-      Serial.printf("[MQTT] Nachlauf already %s, skipping\n", msg);
+      Log.printf("[MQTT] Nachlauf already %s, skipping\n", msg);
       return;
     }
     queueButton(BTN_TIMER, "Timer");
@@ -721,7 +876,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     else if (strcmp(msg, "Power") == 0)    { targetSpeed = 4; btnCode = BTN_FAN_P; btnName = "Fan Power"; }
 
     if (targetSpeed == hood.fanSpeed) {
-      Serial.printf("[MQTT] Fan already at %s, skipping\n", msg);
+      Log.printf("[MQTT] Fan already at %s, skipping\n", msg);
       return;
     }
     queueButton(btnCode, btnName);
@@ -743,9 +898,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 #endif
   // HA restart - re-publish discovery
   else if (t == "homeassistant/status" && strcmp(msg, "online") == 0) {
-    Serial.println("[MQTT] HA restarted, re-publishing discovery...");
+    Log.println("[MQTT] HA restarted, re-publishing discovery...");
     publishDiscovery();
     publishState();
+  }
+  // Remote logging on/off
+  else if (t == MQTT_CMD_LOG) {
+    stopLogStateRestore();
+    setRemoteLog(strcmp(msg, "ON") == 0);
+    Log.printf("[LOG] Remote logging %s\n", remoteLogEnabled ? "enabled" : "disabled");
   }
   // Debug: send raw button code (hex string like "0A")
   else if (t == MQTT_CMD_DEBUG) {
@@ -762,7 +923,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 // WiFi Setup
 // ============================================================================
 void setupWiFi() {
-  Serial.printf("[WiFi] Connecting to %s...\n", WIFI_SSID);
+  Log.printf("[WiFi] Connecting to %s...\n", WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setHostname("berbel-remote");
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -770,34 +931,34 @@ void setupWiFi() {
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 20) {
     delay(500);
-    Serial.print(".");
+    Log.print(".");
     attempts++;
   }
 
   // OTA callbacks (set once, begin() called when WiFi is ready)
   ArduinoOTA.setHostname("berbel-remote");
   ArduinoOTA.onStart([]() {
-    Serial.println("[OTA] Update starting, switching to WiFi priority...");
+    Log.println("[OTA] Update starting, switching to WiFi priority...");
     esp_coex_preference_set(ESP_COEX_PREFER_WIFI);
   });
   ArduinoOTA.onEnd([]() {
-    Serial.println("\n[OTA] Update complete, restoring BLE priority...");
+    Log.println("\n[OTA] Update complete, restoring BLE priority...");
     esp_coex_preference_set(ESP_COEX_PREFER_BT);
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("[OTA] %u%%\r", progress * 100 / total);
+    Log.printf("[OTA] %u%%\r", progress * 100 / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("[OTA] Error %u\n", error);
+    Log.printf("[OTA] Error %u\n", error);
   });
 
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    Log.printf("\n[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
     ArduinoOTA.begin();
     otaReady = true;
-    Serial.println("[OTA] Ready");
+    Log.println("[OTA] Ready");
   } else {
-    Serial.println("\n[WiFi] Connection failed, will retry in loop");
+    Log.println("\n[WiFi] Connection failed, will retry in loop");
   }
 }
 
@@ -812,11 +973,12 @@ void mqttReconnect() {
   if (now - lastMqttReconnect < 5000) return;
   lastMqttReconnect = now;
 
-  Serial.printf("[MQTT] Connecting to %s:%d...\n", MQTT_HOST, MQTT_PORT);
+  Log.printf("[MQTT] Connecting to %s:%d...\n", MQTT_HOST, MQTT_PORT);
 
   if (mqtt.connect("berbel-remote", MQTT_USER, MQTT_PASS,
                     MQTT_AVAIL, 0, true, "offline")) {
-    Serial.println("[MQTT] Connected!");
+    Log.println("[MQTT] Connected!");
+    mqttConnectedAt = millis();
     mqtt.publish(MQTT_AVAIL, "online", true);
 
     mqtt.subscribe(MQTT_CMD_LIGHT_UP);
@@ -833,18 +995,24 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_MOVE_DOWN);
 #endif
     mqtt.subscribe(MQTT_CMD_DEBUG);
+    mqtt.subscribe(MQTT_CMD_LOG);
     mqtt.subscribe("homeassistant/status");
+
+    // Subscribe to the retained log switch state so the setting survives a reboot
+    if (!logStateRestored) {
+      mqtt.subscribe(MQTT_LOG_STATE);
+    }
 
     // Subscribe to own state topic to restore state from retained message
     if (!hoodStateValid) {
       mqtt.subscribe(MQTT_STATE);
-      Serial.println("[MQTT] Subscribed to state topic for restore...");
+      Log.println("[MQTT] Subscribed to state topic for restore...");
     }
 
     publishDiscovery();
     publishState();
   } else {
-    Serial.printf("[MQTT] Failed, rc=%d\n", mqtt.state());
+    Log.printf("[MQTT] Failed, rc=%d\n", mqtt.state());
   }
 }
 
@@ -865,20 +1033,20 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
 
-  Serial.println("\n============================================");
-  Serial.println("  BERBEL REMOTE - HA Bridge (NimBLE)");
-  Serial.println("============================================\n");
+  Log.println("\n============================================");
+  Log.println("  BERBEL REMOTE - HA Bridge (NimBLE)");
+  Log.println("============================================\n");
 
   // ----- BLE Setup (must come first for MAC spoofing) -----
 
-  Serial.println("[MAC] Setting Texas Instruments OUI...");
+  Log.println("[MAC] Setting Texas Instruments OUI...");
   uint8_t ti_mac[6] = {0x88, 0x01, 0xF9, 0xAA, 0xBB, 0xCC};
   esp_base_mac_addr_set(ti_mac);
 
-  Serial.println("[BLE] Initializing NimBLE...");
+  Log.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("");
 
-  Serial.printf("[BLE] MAC: %s\n", NimBLEDevice::getAddress().toString().c_str());
+  Log.printf("[BLE] MAC: %s\n", NimBLEDevice::getAddress().toString().c_str());
 
   // Security: Legacy Pairing, LTK only (no IRK)
   NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
@@ -969,7 +1137,7 @@ void setup() {
 
   // Start advertising with raw data
   startAdvertising();
-  Serial.println("[BLE] Services started, advertising...");
+  Log.println("[BLE] Services started, advertising...");
 
   // Prioritize BLE over WiFi on the shared radio
   esp_coex_preference_set(ESP_COEX_PREFER_BT);
@@ -979,14 +1147,14 @@ void setup() {
   mqtt.setBufferSize(1024);
   mqtt.setCallback(mqttCallback);
 
-  Serial.printf("[SYS] Free heap before WiFi: %u bytes\n", esp_get_free_heap_size());
+  Log.printf("[SYS] Free heap before WiFi: %u bytes\n", esp_get_free_heap_size());
   setupWiFi();
-  Serial.printf("[SYS] Free heap after WiFi: %u bytes\n", esp_get_free_heap_size());
+  Log.printf("[SYS] Free heap after WiFi: %u bytes\n", esp_get_free_heap_size());
   wifiStarted = true;
 
-  Serial.println("\n============================================");
-  Serial.println("  Ready! Waiting for hood...");
-  Serial.println("============================================\n");
+  Log.println("\n============================================");
+  Log.println("  Ready! Waiting for hood...");
+  Log.println("============================================\n");
 }
 
 // ============================================================================
@@ -998,7 +1166,7 @@ void loop() {
   unsigned long now = millis();
   if (now - lastHeapLog > 30000) {
     lastHeapLog = now;
-    Serial.printf("[SYS] Free heap: %u bytes, BLE: %s, WiFi: %s\n",
+    Log.printf("[SYS] Free heap: %u bytes, BLE: %s, WiFi: %s\n",
       esp_get_free_heap_size(),
       deviceConnected ? "connected" : "waiting",
       wifiStarted ? (WiFi.status() == WL_CONNECTED ? "connected" : "disconnected") : "off");
@@ -1009,7 +1177,7 @@ void loop() {
     if (!otaReady) {
       ArduinoOTA.begin();
       otaReady = true;
-      Serial.printf("[OTA] Ready (late init), IP: %s\n", WiFi.localIP().toString().c_str());
+      Log.printf("[OTA] Ready (late init), IP: %s\n", WiFi.localIP().toString().c_str());
     }
     ArduinoOTA.handle();
   }
@@ -1019,7 +1187,7 @@ void loop() {
     static unsigned long lastWifiRetry = 0;
     if (now - lastWifiRetry > 30000) {
       lastWifiRetry = now;
-      Serial.println("[WiFi] Reconnecting...");
+      Log.println("[WiFi] Reconnecting...");
       WiFi.reconnect();
     }
   }
@@ -1030,6 +1198,16 @@ void loop() {
       mqttReconnect();
     } else {
       mqtt.loop();
+
+      // No retained log state showed up in time, so publish ours and stop
+      // waiting. Otherwise the HA switch would sit at unknown forever on a
+      // device that has never been toggled.
+      if (!logStateRestored && now - mqttConnectedAt > 5000) {
+        stopLogStateRestore();
+        setRemoteLog(remoteLogEnabled);
+      }
+
+      publishPendingLogs();
     }
   }
 
@@ -1071,7 +1249,7 @@ void loop() {
 
     // Skip the sync packet (all 0x11) entirely
     if (berbel::isSyncPacket(pendingStatus)) {
-      Serial.println("[HOOD] Sync packet ignored");
+      Log.println("[HOOD] Sync packet ignored");
     } else {
       hoodStateValid = true;
       memcpy(hood.raw, pendingStatus, 9);

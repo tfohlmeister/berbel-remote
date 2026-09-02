@@ -16,6 +16,11 @@
 // plain LED to a free pin and name it here.
 // #define LED_PIN 2
 
+// Mirror the firmware log to the MQTT topic berbel/hood/log. Off here means the
+// log can still be switched on at runtime through the "Remote Log" switch in
+// Home Assistant; that choice is retained and survives a reboot.
+#define REMOTE_LOG_DEFAULT false
+
 // Hood features
 // Set to false if your hood has no retractable cover (lift function).
 // When false, Position, Hochfahren, Herunterfahren, and Cover State
