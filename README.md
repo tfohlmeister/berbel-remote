@@ -87,7 +87,8 @@ The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**,
    ```
    The switch is retained, so it stays on across a reboot, which is what makes it
    useful for catching a crash or a BLE dropout. Set `REMOTE_LOG_DEFAULT true` in
-   `config.h` to have it on from the first boot.
+   `config.h` to have it on from the first boot. For a readable log view inside
+   Home Assistant, see [docs/home-assistant-log-view.md](docs/home-assistant-log-view.md).
 
 ## Home Assistant Entities
 
@@ -108,6 +109,7 @@ All entities are created automatically via MQTT auto-discovery.
 | Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_COVER` only)* |
 | Status Raw | Sensor | Raw 9-byte hex for debugging (diagnostic) |
 | Remote Log | Switch | Mirror the firmware log to MQTT (diagnostic) |
+| Log | Sensor | Most recent firmware log line (diagnostic, disabled by default) |
 
 ## Button Codes
 

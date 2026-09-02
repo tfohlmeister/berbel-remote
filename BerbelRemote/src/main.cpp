@@ -198,7 +198,9 @@ unsigned long lastCmdSent = 0;
 // when remote logging is on, queues the line for MQTT. The queue exists because
 // most log lines are written from the NimBLE host task, while PubSubClient may
 // only be touched from loop().
-#define LOG_LINE_MAX 160
+// Long enough for the longest line the firmware writes, the MQTT state echo,
+// and still under Home Assistant's 255 character limit for a sensor state.
+#define LOG_LINE_MAX 240
 #define LOG_QUEUE_SIZE 24
 
 volatile bool remoteLogEnabled = REMOTE_LOG_DEFAULT;
@@ -672,6 +674,21 @@ void publishDiscovery() {
     "\"val_tpl\":\"{{ value_json.ble }}\","
     "\"dev_cla\":\"connectivity\","
     "\"ent_cat\":\"diagnostic\""
+  );
+
+  // Last log line (diagnostic). Disabled by default: it only carries anything
+  // while remote logging is on, and every line would otherwise land in the
+  // recorder. force_update so repeated identical lines still show up in the
+  // history instead of being collapsed into one.
+  publishDiscoveryMsg(
+    "homeassistant/sensor/berbel_hood/log/config",
+    "\"name\":\"Log\","
+    "\"uniq_id\":\"berbel_log\","
+    "\"stat_t\":\"" MQTT_LOG "\","
+    "\"frc_upd\":true,"
+    "\"en\":false,"
+    "\"ent_cat\":\"diagnostic\","
+    "\"ic\":\"mdi:text-box-outline\""
   );
 
   // Remote logging (diagnostic)
