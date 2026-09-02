@@ -131,9 +131,13 @@ struct HoodState {
 };
 
 // ============================================================================
-// Onboard LED (GPIO 2 on most ESP32 dev boards)
+// Onboard LED (GPIO 2 on most classic ESP32 dev boards). Boards that put their
+// LED elsewhere - the ESP32-S3-DevKitC-1 has only an addressable RGB LED, which
+// this plain digitalWrite cannot drive - override LED_PIN in config.h.
 // ============================================================================
+#ifndef LED_PIN
 #define LED_PIN 2
+#endif
 #define LED_BLINK_MS 500  // blink interval when disconnected
 
 // ============================================================================
@@ -226,12 +230,75 @@ void startAdvertising() {
 }
 
 // ============================================================================
+// GAP Event Logging
+// ============================================================================
+// The server callbacks carry no reason code, so the raw GAP events are needed
+// to tell a lost radio link (supervision timeout) from the hood hanging up on
+// purpose, and to see whether a reconnect fails on encryption - a missing key
+// means the bond is gone and the hood will not come back until it is paired
+// again.
+static const char* hciReasonName(int code) {
+  switch (code) {
+    case BLE_ERR_AUTH_FAIL:          return "authentication failure";
+    case BLE_ERR_PINKEY_MISSING:     return "key missing, bond lost";
+    case BLE_ERR_CONN_SPVN_TMO:      return "supervision timeout, link lost";
+    case BLE_ERR_REM_USER_CONN_TERM: return "closed by the hood";
+    case BLE_ERR_CONN_TERM_LOCAL:    return "closed locally";
+    case BLE_ERR_CONN_ESTABLISHMENT: return "connection establishment failed";
+    default:                         return "see BLE_ERR_* in NimBLE ble.h";
+  }
+}
+
+// NimBLE folds the error class into the numeric range of the status value.
+static void logGapStatus(const char* what, int status) {
+  if (status >= BLE_HS_ERR_HCI_BASE && status < BLE_HS_ERR_L2C_BASE) {
+    int code = status - BLE_HS_ERR_HCI_BASE;
+    Serial.printf("[BLE] %s: HCI 0x%02X - %s\n", what, code, hciReasonName(code));
+  } else if (status >= BLE_HS_ERR_SM_US_BASE && status < BLE_HS_ERR_SM_PEER_BASE) {
+    Serial.printf("[BLE] %s: local pairing error 0x%02X\n",
+                  what, status - BLE_HS_ERR_SM_US_BASE);
+  } else if (status >= BLE_HS_ERR_SM_PEER_BASE && status < BLE_HS_ERR_HW_BASE) {
+    Serial.printf("[BLE] %s: pairing rejected by the hood, error 0x%02X\n",
+                  what, status - BLE_HS_ERR_SM_PEER_BASE);
+  } else {
+    Serial.printf("[BLE] %s: host status %d\n", what, status);
+  }
+}
+
+static int gapEventLogger(ble_gap_event* event, void* arg) {
+  switch (event->type) {
+    case BLE_GAP_EVENT_DISCONNECT:
+      logGapStatus("Disconnect", event->disconnect.reason);
+      break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+      if (event->enc_change.status != 0) {
+        logGapStatus("Encryption failed", event->enc_change.status);
+      }
+      break;
+    default:
+      break;
+  }
+  return 0;
+}
+
+// ============================================================================
 // BLE Callbacks
 // ============================================================================
 class ServerCallbacks : public NimBLEServerCallbacks {
   void onConnect(NimBLEServer* pServer) override {
     deviceConnected = true;
     Serial.println("[BLE] Hood connected!");
+  }
+
+  void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) override {
+    Serial.printf("[BLE] Peer %s, encrypted=%d bonded=%d\n",
+                  NimBLEAddress(desc->peer_ota_addr).toString().c_str(),
+                  desc->sec_state.encrypted, desc->sec_state.bonded);
+  }
+
+  void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
+    Serial.printf("[BLE] Authentication complete: encrypted=%d bonded=%d\n",
+                  desc->sec_state.encrypted, desc->sec_state.bonded);
   }
 
   void onDisconnect(NimBLEServer* pServer) override {
@@ -786,6 +853,12 @@ void mqttReconnect() {
 // ============================================================================
 void setup() {
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  // Serial is the USB CDC here. Once a host has enumerated and then stops
+  // draining the FIFO, every write blocks until the timeout - long enough to
+  // stall the BLE callbacks that log there. Drop output instead.
+  Serial.setTxTimeoutMs(0);
+#endif
   delay(1000);
 
   // LED setup - starts blinking (disconnected state)
@@ -812,6 +885,8 @@ void setup() {
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC);
   NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC);
+
+  NimBLEDevice::setCustomGapHandler(gapEventLogger);
 
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());

@@ -10,6 +10,12 @@
 #define MQTT_USER "mqtt-user"
 #define MQTT_PASS "mqtt-password"
 
+// Status LED. Defaults to GPIO 2, the onboard LED of most classic ESP32 dev
+// boards. The ESP32-S3-DevKitC-1 has only an addressable RGB LED, which this
+// firmware cannot drive, so there the indicator stays dark unless you wire a
+// plain LED to a free pin and name it here.
+// #define LED_PIN 2
+
 // Hood features
 // Set to false if your hood has no retractable cover (lift function).
 // When false, Position, Hochfahren, Herunterfahren, and Cover State

@@ -33,6 +33,7 @@ jobs:
         run: |
           cp BerbelRemote/src/config.example.h BerbelRemote/src/config.h
           pio run -e esp32dev -d BerbelRemote
+          pio run -e esp32s3 -d BerbelRemote
 
       # config.example.h only covers one combination of the hood feature flags.
       # Build the others too, otherwise a typo inside a disabled #if block

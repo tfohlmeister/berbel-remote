@@ -62,6 +62,14 @@ The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**,
    pio run -e ota -t upload # OTA (subsequent updates)
    ```
 
+   On an ESP32-S3, use the `esp32s3` and `ota-s3` environments instead. They also
+   route the firmware log to the board's built-in USB-Serial-JTAG port, which the
+   default ESP32 build leaves on UART0:
+   ```bash
+   pio run -e esp32s3 -t upload
+   pio run -e ota-s3 -t upload
+   ```
+
 4. **Pair with the hood:**
    - Put the hood into pairing mode (on the Skyline Frame: hold the power and light buttons on the hood simultaneously for 5 seconds; other models may differ)
    - The ESP32 will connect automatically
