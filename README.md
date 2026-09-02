@@ -81,14 +81,13 @@ The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**,
    ```
 
    Without a cable, turn on the **Remote Log** switch in Home Assistant and the
-   same output is published to MQTT:
+   firmware publishes the same output to MQTT:
    ```bash
    mosquitto_sub -h <broker> -u <user> -P <pass> -t 'berbel/hood/log'
    ```
-   The switch is retained, so it stays on across a reboot, which is what makes it
-   useful for catching a crash or a BLE dropout. Set `REMOTE_LOG_DEFAULT true` in
-   `config.h` to have it on from the first boot. For a readable log view inside
-   Home Assistant, see [docs/home-assistant-log-view.md](docs/home-assistant-log-view.md).
+   In Home Assistant the lines show up in the history of the **Log** entity, which
+   ships disabled and has to be enabled once. Both steps, and how to read the
+   result, are in [docs/remote-logging.md](docs/remote-logging.md).
 
 ## Home Assistant Entities
 
