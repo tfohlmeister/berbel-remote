@@ -29,6 +29,7 @@
  *   - Oberlicht       (light)          Toggle upper light
  *   - Unterlicht      (light)          Toggle lower light
  *   - Deckenlicht     (light)          Toggle ceiling connection light (only with HOOD_HAS_CEILING_LIGHT)
+ *   - Multifunktion   (button)         Press the multifunction key (only with HOOD_HAS_MULTI_BUTTON)
  *   - Luefter         (select)         Fan speed: Aus, Stufe 1-3, Power
  *   - Ausschalten     (button)         Power off (starts Nachlauf)
  *   - Nachlauf        (switch)         Toggle afterrun timer
@@ -66,6 +67,10 @@
 #define HOOD_HAS_CEILING_LIGHT false
 #endif
 
+#ifndef HOOD_HAS_MULTI_BUTTON
+#define HOOD_HAS_MULTI_BUTTON false
+#endif
+
 // Whether remote logging starts enabled. The retained MQTT state overrides this
 // on boot, so a device that was switched on stays on across a reboot.
 #ifndef REMOTE_LOG_DEFAULT
@@ -92,7 +97,7 @@
 #define BTN_RECIRC      0x08
 #define BTN_MOVE_UP     0x09
 #define BTN_LIGHT_DOWN  0x0A
-#define BTN_MULTI       0x0B  // multifunction, drives the ceiling connection light
+#define BTN_MULTI       0x0B  // does whatever the Berbel app assigned to it
 #define BTN_TIMER       0x0C
 #define BTN_MOVE_DOWN   0x0D
 
@@ -112,6 +117,9 @@
 #define MQTT_CMD_LIGHT_DOWN MQTT_BASE "/light_down/set"
 #if HOOD_HAS_CEILING_LIGHT
 #define MQTT_CMD_LIGHT_CEILING MQTT_BASE "/light_ceiling/set"
+#endif
+#if HOOD_HAS_MULTI_BUTTON
+#define MQTT_CMD_MULTI      MQTT_BASE "/multi/set"
 #endif
 #define MQTT_CMD_FAN_PRESET MQTT_BASE "/fan/preset/set"
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
@@ -638,15 +646,27 @@ void publishDiscoveryMsg(const char* topic, const char* fields) {
 }
 
 void cleanupOldDiscovery() {
-  // Remove old entity configs that no longer exist (empty payload = delete)
+  // Remove entity configs that should not exist (empty payload = delete).
+  // Discovery messages are retained, so an entity a previous build registered
+  // outlives the build: turning a feature off again is not enough to make it
+  // disappear, someone has to say so. Every optional entity is listed here
+  // under the negated flag that creates it.
   const char* oldTopics[] = {
+    // Entities from earlier versions of this firmware
     "homeassistant/fan/berbel_hood/fan/config",
     "homeassistant/binary_sensor/berbel_hood/nachlauf/config",
     "homeassistant/cover/berbel_hood/cover/config",
 #if !HOOD_HAS_CEILING_LIGHT
-    // Feature disabled again: drop the entity a previous build registered,
-    // otherwise it lingers in HA as a toggle nothing listens to.
     "homeassistant/light/berbel_hood/light_ceiling/config",
+#endif
+#if !HOOD_HAS_MULTI_BUTTON
+    "homeassistant/button/berbel_hood/multi/config",
+#endif
+#if !HOOD_HAS_COVER
+    "homeassistant/select/berbel_hood/position/config",
+    "homeassistant/button/berbel_hood/move_up/config",
+    "homeassistant/button/berbel_hood/move_down/config",
+    "homeassistant/sensor/berbel_hood/cover_state/config",
 #endif
     nullptr
   };
@@ -777,6 +797,18 @@ void publishDiscovery() {
     "\"cmd_t\":\"" MQTT_CMD_NACHLAUF "\","
     "\"ic\":\"mdi:timer-sand\""
   );
+
+#if HOOD_HAS_MULTI_BUTTON
+  // Multifunction key. What it does is configured in the Berbel app, so this is
+  // a plain button press with no state attached.
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/multi/config",
+    "\"name\":\"Multifunktion\","
+    "\"uniq_id\":\"berbel_multi\","
+    "\"cmd_t\":\"" MQTT_CMD_MULTI "\","
+    "\"ic\":\"mdi:gesture-tap-button\""
+  );
+#endif
 
 #if HOOD_HAS_COVER
   // Move Up button (unconditional)
@@ -924,6 +956,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     queueButton(BTN_MULTI, "Light Ceiling");
   }
 #endif
+#if HOOD_HAS_MULTI_BUTTON
+  // The multifunction key does whatever was assigned to it in the Berbel app,
+  // which is often a scene rather than a toggle. Nothing to guard against a
+  // state with: just press it.
+  else if (t == MQTT_CMD_MULTI) {
+    queueButton(BTN_MULTI, "Multi");
+  }
+#endif
   // Power button (Ausschalten)
   else if (t == MQTT_CMD_POWER) {
     queueButton(BTN_POWER, "Power Off");
@@ -1066,6 +1106,9 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_LIGHT_DOWN);
 #if HOOD_HAS_CEILING_LIGHT
     mqtt.subscribe(MQTT_CMD_LIGHT_CEILING);
+#endif
+#if HOOD_HAS_MULTI_BUTTON
+    mqtt.subscribe(MQTT_CMD_MULTI);
 #endif
     mqtt.subscribe(MQTT_CMD_POWER);
     mqtt.subscribe(MQTT_CMD_NACHLAUF);

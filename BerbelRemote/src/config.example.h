@@ -27,8 +27,17 @@
 // entities will not be created in Home Assistant.
 #define HOOD_HAS_COVER true
 
+// The multifunction button (code 0x0B) does whatever you assigned to it in the
+// Berbel app: a light, or a scene that sets height, fan level and lighting at
+// once. Set this to true to get a "Multifunktion" button in Home Assistant that
+// simply presses it.
+#define HOOD_HAS_MULTI_BUTTON false
+
 // Set to true if your hood has a ceiling connection with effect lighting
-// ("Deckenanschluss mit Effektbeleuchtung"), the optional third lamp driven
-// by the multifunction button. When false, the Deckenlicht entity will not
-// be created in Home Assistant.
+// ("Deckenanschluss mit Effektbeleuchtung", called Uplight in newer berbel
+// manuals) AND the multifunction button is assigned to toggle it. Only then is
+// a light entity the right fit: it tracks the lamp's state and sends the button
+// when that state should change. If the app assigns anything else to the button
+// (turning the lamp on without turning it off again, or a scene), use
+// HOOD_HAS_MULTI_BUTTON instead, or the entity gets stuck on.
 #define HOOD_HAS_CEILING_LIGHT false

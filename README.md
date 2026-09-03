@@ -68,12 +68,13 @@ for it and the findings are welcome in an issue.
    cp src/config.example.h src/config.h
    ```
 
-2. **Edit `src/config.h`** with your WiFi and MQTT credentials, then match the two feature flags to your hood:
+2. **Edit `src/config.h`** with your WiFi and MQTT credentials, then match the feature flags to your hood:
 
    | Flag | Default | Set it when |
    |------|---------|-------------|
    | `HOOD_HAS_COVER` | `true` | Your hood has no retractable cover (lift function): set `false` to drop the Position, Hochfahren, Herunterfahren and Cover State entities. |
-   | `HOOD_HAS_CEILING_LIGHT` | `false` | Your hood has a ceiling connection with effect lighting (a third lamp): set `true` to add the Deckenlicht entity. |
+   | `HOOD_HAS_MULTI_BUTTON` | `false` | You assigned something to the multifunction button in the Berbel app: set `true` to add a Multifunktion button that presses it. |
+   | `HOOD_HAS_CEILING_LIGHT` | `false` | Your hood has a ceiling connection with effect lighting (a third lamp) **and** the multifunction button is assigned to toggle it: set `true` to add the Deckenlicht entity. Any other assignment needs `HOOD_HAS_MULTI_BUTTON` instead, see [The multifunction button](#the-multifunction-button). |
 
 3. **Build and flash:**
    ```bash
@@ -125,9 +126,29 @@ All entities are created automatically via MQTT auto-discovery.
 | Herunterfahren | Button | Move down unconditionally *(`HOOD_HAS_COVER` only)* |
 | BLE Verbindung | Binary Sensor | BLE connection status (diagnostic) |
 | Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_COVER` only)* |
+| Multifunktion | Button | Presses the multifunction key (only with `HOOD_HAS_MULTI_BUTTON`) |
 | Status Raw | Sensor | Raw 9-byte hex for debugging (diagnostic) |
 | Remote Log | Switch | Mirror the firmware log to MQTT (diagnostic) |
 | Log | Sensor | Most recent firmware log line (diagnostic, disabled by default) |
+
+### The multifunction button
+
+Button `0x0B` is the one berbel leaves to you: what it does is assigned in the
+**Berbel app**, and it is often a scene (set the hood to a height, the fan to a
+level and the lights at once) rather than a simple toggle.
+
+That matters for how it is exposed. `HOOD_HAS_MULTI_BUTTON` gives you a plain
+**Multifunktion** button that presses it and nothing more, which is correct
+whatever you assigned. `HOOD_HAS_CEILING_LIGHT` gives you a **Deckenlicht**
+light entity instead, which only fits if you assigned a toggle to the button:
+with an assignment such as "switch the lamp on", the entity has no way to switch
+it off and gets stuck on
+([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
+
+The berbel manual also documents a long press (> 1 s) on that button as a
+dimmer. This firmware always sends a short press, so dimming is not reachable
+through the entities; `berbel/hood/debug/send` with `0B:1500` is the way to try
+it.
 
 ## Button Codes
 
@@ -148,7 +169,7 @@ performs a function at all depends on its equipment.
 | 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter | no, by elimination |
 | 0x09 | Raise | Liftfunktion "Heben" | yes |
 | 0x0A | Cooktop Light (Unterlicht) | Kochfeld-Beleuchtung | yes |
-| 0x0B | Ceiling Light | Multifunktionstaste (e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
+| 0x0B | Multifunction | Multifunktionstaste (assigned in the Berbel app, e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
 | 0x0C | Afterrun | Nachlauffunktion | yes |
 | 0x0D | Lower | Liftfunktion "Senken" | yes |
 
