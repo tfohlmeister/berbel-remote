@@ -175,6 +175,32 @@ The hood writes 9-byte status packets to `f004f001`. All values are bitmask-base
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
 | [6] | 0x01 | Cover moving down (deploying) |
 
+### Cover movement on the lift models
+
+A button-driven move sets exactly one of the two movement flags. Starting the
+fan from the parked position is different: the hood drives down first, and for
+the roughly ten seconds that takes, byte [4] and byte [6] carry the **same**
+value, first `0x0D` and then `0x01`. Both flags set therefore means deploying,
+never retracting, and the decoder gives byte [6] priority for that reason.
+
+Measured on a BFB 6bT with lift, fan switched to Stufe 1 from the parked
+position:
+
+```
+10 00 00 D0 00 00 00 00 00
+10 00 00 D0 0D 00 0D 00 00
+10 00 00 00 0D 00 0D 00 00
+10 00 00 00 01 00 01 00 00
+10 00 00 D0 01 00 01 00 00
+10 00 00 00 00 00 00 00 00   <- ten seconds later, hood is down
+```
+
+`byte[3] = 0xD0` appears only during that phase and is not decoded; what it
+means is unknown. No frame carries an absolute position, so "up" and "down" are
+inferred from the direction of the last movement rather than read from the hood.
+Switching the hood off does not produce movement frames at all: it does not
+retract on its own.
+
 On connect, the hood sends a sync packet (all bytes `0x11`) which should be ignored.
 
 ## Wireshark Analysis Commands

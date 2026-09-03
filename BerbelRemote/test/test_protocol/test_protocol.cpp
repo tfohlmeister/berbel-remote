@@ -196,6 +196,14 @@ void test_cover_settles_down_after_moving_down(void) {
   TEST_ASSERT_EQUAL_STRING("Unten", c.position);
 }
 
+// Starting the fan from the parked position sets both flags for the whole
+// descent, so the hood is deploying, not retracting.
+void test_cover_both_flags_means_deploying(void) {
+  CoverResult c = nextCoverState("up", "Oben", true, true);
+  TEST_ASSERT_EQUAL_STRING("moving down", c.state);
+  TEST_ASSERT_EQUAL_STRING("Unten", c.position);
+}
+
 void test_cover_idle_keeps_state(void) {
   CoverResult c = nextCoverState("up", "Oben", false, false);
   TEST_ASSERT_EQUAL_STRING("up", c.state);
@@ -332,6 +340,7 @@ int main(int, char**) {
   RUN_TEST(test_cover_moving_down_sets_unten);
   RUN_TEST(test_cover_settles_up_after_moving_up);
   RUN_TEST(test_cover_settles_down_after_moving_down);
+  RUN_TEST(test_cover_both_flags_means_deploying);
   RUN_TEST(test_cover_idle_keeps_state);
 
   RUN_TEST(test_fan_preset_name);
