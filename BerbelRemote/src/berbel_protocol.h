@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 
 namespace berbel {
 
@@ -98,6 +99,31 @@ inline uint8_t fanPresetToSpeed(const char* preset) {
   if (strcmp(preset, "Stufe 3") == 0) return 3;
   if (strcmp(preset, "Power") == 0)   return 4;
   return 0;
+}
+
+// Parse a `berbel/hood/debug/send` payload: a two-digit hex button code, and
+// optionally `:` plus how long to hold the button in milliseconds. "0B" and
+// "0B:2000" are both valid, anything else is rejected rather than guessed at,
+// since the whole point of the topic is careful probing.
+// `code` and `holdMs` are only written on success. `holdMs` is left at whatever
+// the caller put there when the payload carries no hold time.
+inline bool parseDebugCommand(const char* s, uint16_t maxHoldMs,
+                              uint8_t* code, uint16_t* holdMs) {
+  char* end = nullptr;
+  long parsedCode = strtol(s, &end, 16);
+  if (end == s || parsedCode < 0x01 || parsedCode > 0xFF) return false;
+
+  long parsedHold = -1;
+  if (*end == ':') {
+    const char* holdStart = end + 1;
+    parsedHold = strtol(holdStart, &end, 10);
+    if (end == holdStart || parsedHold < 1 || parsedHold > maxHoldMs) return false;
+  }
+  if (*end != '\0') return false;
+
+  *code = (uint8_t)parsedCode;
+  if (parsedHold >= 0) *holdMs = (uint16_t)parsedHold;
+  return true;
 }
 
 // Extract a string value for `key` from a flat `"key":"value"` JSON object.

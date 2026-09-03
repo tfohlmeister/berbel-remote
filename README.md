@@ -19,19 +19,38 @@ ESP32-based emulator for the **Berbel BFB 6bT** remote control (Art. 1090045), w
 
 ## Compatible Hoods
 
-The BFB 6bT remote works with Berbel hoods equipped with **berbel Connect 2.0**, manufactured from **November 2020** onwards. This emulator should work with any hood that supports the original remote.
+This firmware emulates the **BFB 6bT** remote (Art. 1090045), so it reaches the
+hoods that remote reaches: those with **berbel Connect 2.0** and the berbel
+ConInterface (Art. 1090043), built from **November 2020** onwards (built-in
+models from April 2021). Developed and tested against a Berbel Skyline Frame.
 
-**Island Hoods:** Skyline Frame, Skyline Edge, Skyline Curve, Skyline Sound, Skyline Light, Skyline Round, Ergoline, Glassline, Blockline, Smartline
+berbel has since discontinued the 6bT and replaced it with the **BFB 8bT**
+(Art. 1090093), which carries the same 13 buttons and the same functions for the
+same range of hoods. Untested here, but nothing suggests it needs a different
+emulation.
 
-**Wall-Mounted Hoods:** Glassline, Blockline, Smartline
+### Where this firmware falls short
 
-**Headroom Hoods:** Ergoline, Glassline, Formline, Smartline
+The **Skyline Edge Base (BIH SKEB)** and **Skyline Edge Play (BIH SKEP)** ship
+with the **BFB 7bT** (Art. 1090084) instead, and berbel lists that remote as
+compatible with those two hoods only. Those hoods do pair with this firmware and
+do respond to the basic functions, but not to everything:
 
-**Built-in Hoods (from April 2021):** Glassline, Firstline, Firstline Touch, Firstline Unseen
+* The 7bT has **19 buttons against the 6bT's 13**, among them Uplight, Motion
+  Lights, colour temperature for each light and a favourite scene. This firmware
+  has no button code for any of them, because the remote it emulates has no such
+  key.
+* Conversely the 6bT's **Multifunktionstaste** and **Synchronisation** do not
+  exist on the 7bT. The key in that position is listed in the berbel manual as
+  "ohne Funktion", which is why sending `0x0B` to a Skyline Edge does nothing
+  ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
+* Their status frame is longer and lays some flags out differently, see
+  [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
 
-**Fan Modules (from April 2021):** Firstline
-
-> **Note:** Hoods built before November 2020 are not compatible. If unsure, check the serial number with Berbel customer service.
+These hoods also expose a GATT server of their own, which is a different
+protocol from the one here and is handled by other projects. If you want to map
+the missing functions for a Skyline Edge, `berbel/hood/debug/send` is the tool
+for it and the findings are welcome in an issue.
 
 ## Hardware Requirements
 
@@ -133,7 +152,41 @@ performs a function at all depends on its equipment.
 | 0x0C | Afterrun | Nachlauffunktion | yes |
 | 0x0D | Lower | Liftfunktion "Senken" | yes |
 
+The table covers the BFB 6bT. Other remotes may use codes beyond `0x0D`, or put a
+function somewhere else entirely: on a BFB 7bT hood, `0x0B` does nothing at all
+while the original remote still switches its ceiling light
+([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
+
 Protocol: 2-byte notifications on characteristic `f004f002-...-berbel`. Press: `[code, 0x00]`, Release: `[0x00, 0x00]`.
+
+### Sending a raw button code
+
+`berbel/hood/debug/send` presses any code, including ones this firmware does not
+know. Use it to find what a function sits on when the table above does not fit
+your hood:
+
+```bash
+mosquitto_pub -h <broker> -u <user> -P <pass> -t 'berbel/hood/debug/send' -m '0B'
+mosquitto_pub -h <broker> -u <user> -P <pass> -t 'berbel/hood/debug/send' -m '0B:2000'
+```
+
+The payload is a hex code from `01` to `FF`, optionally followed by `:` and how
+long to hold the button in milliseconds (1 to 5000, default 100). The long form
+is for functions that may want a long press, such as a multifunction button.
+
+Watch what a code does on the `Status Raw` sensor, or turn on remote logging and
+read the `[HOOD] Status` lines directly (see
+[docs/remote-logging.md](docs/remote-logging.md)).
+
+A press the hood acts on produces a status frame within about half a second. No
+frame means the hood did nothing, which is the useful signal when hunting for a
+code, but it does not by itself prove the code is wrong: on a BFB 6bT hood,
+`0A` (Kochfeld-Beleuchtung) switches the light on a short press and is ignored
+entirely when held for two seconds. Both cases look the same from outside.
+
+There is no state guard here: this sends the press whatever the hood is
+currently doing, so a toggle really does toggle. Holding a button for seconds
+stalls MQTT and OTA for that long, which is why the hold time is capped.
 
 ## Hood Status Bytes
 

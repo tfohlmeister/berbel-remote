@@ -96,6 +96,12 @@
 #define BTN_TIMER       0x0C
 #define BTN_MOVE_DOWN   0x0D
 
+// How long a button is held down. The original remote is not this precise, but
+// every function reacts to a short press. The debug topic can override it, for
+// hoods whose multifunction button may want a longer one.
+#define BTN_HOLD_MS     100
+#define BTN_HOLD_MAX_MS 5000
+
 // ============================================================================
 // MQTT Topics
 // ============================================================================
@@ -183,6 +189,7 @@ uint8_t pendingStatus[9];
 struct CmdEntry {
   uint8_t code;
   char name[16];
+  uint16_t holdMs;
 };
 #define CMD_QUEUE_SIZE 16
 #define CMD_DELAY_MS 300  // minimum ms between button presses
@@ -332,8 +339,9 @@ static uint8_t raw_adv_data[] = {
 // ============================================================================
 // Forward Declarations
 // ============================================================================
-void sendButton(uint8_t code, const char* name);
-void queueButton(uint8_t code, const char* name);
+void sendButton(uint8_t code, const char* name, uint16_t holdMs = BTN_HOLD_MS);
+void processHoodStatus();
+void queueButton(uint8_t code, const char* name, uint16_t holdMs = BTN_HOLD_MS);
 void processCmdQueue();
 void publishState();
 void publishDiscovery();
@@ -464,19 +472,28 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 // ============================================================================
 // Send Button Press/Release via BLE
 // ============================================================================
-void sendButton(uint8_t code, const char* name) {
+void sendButton(uint8_t code, const char* name, uint16_t holdMs) {
   if (!deviceConnected || !pNotifyChar) {
     Log.printf("[BTN] Cannot send %s - not connected\n", name);
     return;
   }
 
-  Log.printf("[BTN] Sending: %s (0x%02X)\n", name, code);
+  Log.printf("[BTN] Sending: %s (0x%02X), holding %u ms\n", name, code, holdMs);
 
   uint8_t press[] = {code, 0x00};
   pNotifyChar->setValue(press, 2);
   pNotifyChar->notify();
 
-  delay(100);
+  // Blocks the loop for the hold time, so MQTT and OTA stall meanwhile. Fine at
+  // the default; the cap keeps a debug press from stalling them long enough to
+  // drop the broker connection. Status frames are drained as they arrive, so a
+  // long press does not swallow the transitions it was sent to observe.
+  unsigned long holdUntil = millis() + holdMs;
+  while ((long)(millis() - holdUntil) < 0) {
+    delay(10);
+    processHoodStatus();
+    publishPendingLogs();  // otherwise the whole hold shows up at its end
+  }
 
   uint8_t release[] = {0x00, 0x00};
   pNotifyChar->setValue(release, 2);
@@ -486,7 +503,7 @@ void sendButton(uint8_t code, const char* name) {
 // ============================================================================
 // Command Queue (space out BLE commands for reliability)
 // ============================================================================
-void queueButton(uint8_t code, const char* name) {
+void queueButton(uint8_t code, const char* name, uint16_t holdMs) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next == cmdQueueTail) {
     Log.printf("[CMD] Queue full, dropping: %s\n", name);
@@ -495,6 +512,7 @@ void queueButton(uint8_t code, const char* name) {
   cmdQueue[cmdQueueHead].code = code;
   strncpy(cmdQueue[cmdQueueHead].name, name, sizeof(cmdQueue[cmdQueueHead].name) - 1);
   cmdQueue[cmdQueueHead].name[sizeof(cmdQueue[cmdQueueHead].name) - 1] = '\0';
+  cmdQueue[cmdQueueHead].holdMs = holdMs;
   cmdQueueHead = next;
   int pending = (cmdQueueHead - cmdQueueTail + CMD_QUEUE_SIZE) % CMD_QUEUE_SIZE;
   Log.printf("[CMD] Queued: %s (0x%02X), pending: %d\n", name, code, pending);
@@ -508,9 +526,47 @@ void processCmdQueue() {
   if (now - lastCmdSent < CMD_DELAY_MS) return;  // wait between commands
 
   CmdEntry& cmd = cmdQueue[cmdQueueTail];
-  sendButton(cmd.code, cmd.name);
+  sendButton(cmd.code, cmd.name, cmd.holdMs);
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  lastCmdSent = millis();  // after sendButton (includes 100ms delay)
+  lastCmdSent = millis();  // after sendButton, which includes the hold time
+}
+
+// ============================================================================
+// Hood Status Processing
+// ============================================================================
+// `pendingStatus` is a single slot the NimBLE task overwrites, so a frame is
+// lost unless this runs between two of them. Called from loop() and from
+// sendButton() while a button is held down.
+void processHoodStatus() {
+  if (!newStatusReceived) return;
+  newStatusReceived = false;
+
+  // Skip the sync packet (all 0x11) entirely
+  if (berbel::isSyncPacket(pendingStatus)) {
+    Log.println("[HOOD] Sync packet ignored");
+    return;
+  }
+
+  hoodStateValid = true;
+  memcpy(hood.raw, pendingStatus, 9);
+
+  berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw);
+  hood.lightUp   = status.lightUp;
+  hood.lightDown = status.lightDown;
+#if HOOD_HAS_CEILING_LIGHT
+  hood.lightCeiling = status.lightCeiling;
+#endif
+  hood.fanSpeed  = status.fanSpeed;
+  hood.nachlauf  = status.nachlauf;
+
+#if HOOD_HAS_COVER
+  berbel::CoverResult cover = berbel::nextCoverState(
+    hood.coverState, hood.position, status.movingUp, status.movingDown);
+  hood.coverState = cover.state;
+  hood.position = cover.position;
+#endif
+
+  publishState();
 }
 
 // ============================================================================
@@ -925,14 +981,22 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     setRemoteLog(strcmp(msg, "ON") == 0);
     Log.printf("[LOG] Remote logging %s\n", remoteLogEnabled ? "enabled" : "disabled");
   }
-  // Debug: send raw button code (hex string like "0A")
+  // Send a raw button code, to find the ones this firmware does not know. Takes
+  // "0B" or "0B:2000", the second form holding the button for 2000 ms. Not
+  // limited to the codes in the table above: a hood model may well use others,
+  // and finding them is what this topic is for.
   else if (t == MQTT_CMD_DEBUG) {
-    uint8_t code = (uint8_t)strtol(msg, NULL, 16);
-    if (code >= 0x01 && code <= 0x0D) {
-      char name[16];
-      snprintf(name, sizeof(name), "Debug 0x%02X", code);
-      queueButton(code, name);
+    uint8_t code = 0;
+    uint16_t hold = BTN_HOLD_MS;
+    if (!berbel::parseDebugCommand(msg, BTN_HOLD_MAX_MS, &code, &hold)) {
+      Log.printf("[DBG] Ignored '%s': expected a code 01-FF, optionally :1-%d\n",
+                 msg, BTN_HOLD_MAX_MS);
+      return;
     }
+
+    char name[16];
+    snprintf(name, sizeof(name), "Debug 0x%02X", code);
+    queueButton(code, name, hold);
   }
 }
 
@@ -1260,36 +1324,7 @@ void loop() {
   // --- Process command queue (spaced out button presses) ---
   processCmdQueue();
 
-  // --- Process status update from hood (set in BLE callback) ---
-  if (newStatusReceived) {
-    newStatusReceived = false;
-
-    // Skip the sync packet (all 0x11) entirely
-    if (berbel::isSyncPacket(pendingStatus)) {
-      Log.println("[HOOD] Sync packet ignored");
-    } else {
-      hoodStateValid = true;
-      memcpy(hood.raw, pendingStatus, 9);
-
-      berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw);
-      hood.lightUp   = status.lightUp;
-      hood.lightDown = status.lightDown;
-#if HOOD_HAS_CEILING_LIGHT
-      hood.lightCeiling = status.lightCeiling;
-#endif
-      hood.fanSpeed  = status.fanSpeed;
-      hood.nachlauf  = status.nachlauf;
-
-#if HOOD_HAS_COVER
-      berbel::CoverResult cover = berbel::nextCoverState(
-        hood.coverState, hood.position, status.movingUp, status.movingDown);
-      hood.coverState = cover.state;
-      hood.position = cover.position;
-#endif
-
-      publishState();
-    }
-  }
+  processHoodStatus();
 
   delay(10);
 }
