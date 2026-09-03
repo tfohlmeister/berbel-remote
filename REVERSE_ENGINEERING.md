@@ -175,6 +175,28 @@ The hood writes 9-byte status packets to `f004f001`. All values are bitmask-base
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
 | [6] | 0x01 | Cover moving down (deploying) |
 
+Bytes [3], [7] and [8] are `0x00` in every frame observed so far, with one
+exception described below. Nothing decodes them.
+
+### Byte [3]: seen but not understood
+
+`byte[3]` takes the value `0xD0` during one specific phase and is `0x00` at
+every other moment, including all button-driven cover moves, every fan level,
+both lights and the afterrun. The phase is the automatic descent a lift model
+performs when the fan is switched on from the parked position, and even there
+the byte does not stay set: it appears, clears, and appears again while the
+hood is moving.
+
+What it means is unknown. It is not a position: the value never varies with how
+far the hood has travelled, and it is absent from the button-driven moves that
+cover the same distance. Nor is it a direction, since it never accompanies a
+retraction. It behaves more like a transient mode or status marker for the
+"deploy before running" sequence than like a field with a value.
+
+The firmware ignores it. It is recorded here because it is the only byte in the
+frame that is known to carry information we cannot read, and because a hood
+that reports an absolute position would most plausibly do it here.
+
 ### Cover movement on the lift models
 
 A button-driven move sets exactly one of the two movement flags. Starting the
@@ -195,11 +217,11 @@ position:
 10 00 00 00 00 00 00 00 00   <- ten seconds later, hood is down
 ```
 
-`byte[3] = 0xD0` appears only during that phase and is not decoded; what it
-means is unknown. No frame carries an absolute position, so "up" and "down" are
-inferred from the direction of the last movement rather than read from the hood.
-Switching the hood off does not produce movement frames at all: it does not
-retract on its own.
+Note the `0xD0` in `byte[3]` above, which is the only place it ever shows up.
+
+No frame carries an absolute position, so "up" and "down" are inferred from the
+direction of the last movement rather than read from the hood. Switching the
+hood off produces no movement frames at all: it does not retract on its own.
 
 On connect, the hood sends a sync packet (all bytes `0x11`) which should be ignored.
 
