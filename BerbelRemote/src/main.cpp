@@ -13,7 +13,7 @@
  * - Hood status:    9-byte writes from hood on f004f001
  * - Sync packet:    all 0x11 (ignored, sent on connect)
  *
- * Hood Status Bytes (9 bytes, bitmask-based):
+ * Hood Status Bytes (first 9 bytes of the frame, bitmask-based):
  *   Byte[0] & 0x10  = Fan Stufe 1
  *   Byte[1] & 0x01  = Fan Stufe 2
  *   Byte[1] & 0x10  = Fan Stufe 3
@@ -454,7 +454,10 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
     }
     Log.println();
 
-    if (value.length() == 9) {
+    // Some models send a longer frame (the Skyline Edge Play sends 13 bytes)
+    // whose leading bytes carry the same fields. Anything past the ninth is not
+    // decoded yet.
+    if (value.length() >= 9) {
       memcpy(pendingStatus, (const uint8_t*)value.data(), 9);
       newStatusReceived = true;
     }
