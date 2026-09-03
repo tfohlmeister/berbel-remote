@@ -254,51 +254,149 @@ void test_json_get_value_buffer_too_small(void) {
 }
 
 // ----------------------------------------------------------------------------
+// decodeHoodStatus - 13-byte frame (Skyline Edge Play, measured in issue #3)
+// ----------------------------------------------------------------------------
+void test_long_frame_all_off(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  DecodedStatus s = decodeHoodStatus(raw, STATUS_MAX_LEN);
+  TEST_ASSERT_FALSE(s.lightDown);
+  TEST_ASSERT_FALSE(s.lightCeiling);
+  TEST_ASSERT_EQUAL_UINT8(0, s.fanSpeed);
+}
+
+void test_long_frame_light_down(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[4] = 0x10;
+  DecodedStatus s = decodeHoodStatus(raw, STATUS_MAX_LEN);
+  TEST_ASSERT_TRUE(s.lightDown);
+  TEST_ASSERT_FALSE(s.lightCeiling);
+}
+
+// The one flag that moved: byte 9 on the long frame, byte 5 on the short one.
+void test_long_frame_light_ceiling(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[9] = 0x01;
+  DecodedStatus s = decodeHoodStatus(raw, STATUS_MAX_LEN);
+  TEST_ASSERT_TRUE(s.lightCeiling);
+  TEST_ASSERT_FALSE(s.lightDown);
+}
+
+void test_long_frame_ignores_short_frame_ceiling_bit(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[5] = 0x01;
+  TEST_ASSERT_FALSE(decodeHoodStatus(raw, STATUS_MAX_LEN).lightCeiling);
+}
+
+void test_long_frame_both_lights(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[4] = 0x10;
+  raw[9] = 0x01;
+  DecodedStatus s = decodeHoodStatus(raw, STATUS_MAX_LEN);
+  TEST_ASSERT_TRUE(s.lightDown);
+  TEST_ASSERT_TRUE(s.lightCeiling);
+}
+
+void test_long_frame_fan_steps(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[0] = 0x10;
+  TEST_ASSERT_EQUAL_UINT8(1, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+
+  memset(raw, 0, sizeof(raw));
+  raw[1] = 0x01;
+  TEST_ASSERT_EQUAL_UINT8(2, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+
+  memset(raw, 0, sizeof(raw));
+  raw[1] = 0x10;
+  TEST_ASSERT_EQUAL_UINT8(3, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+}
+
+// A hood whose frame length we have never seen falls back to the short layout,
+// both below and above the lengths we do know.
+void test_unknown_frame_length_uses_short_layout(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[5] = 0x01;
+  TEST_ASSERT_TRUE(decodeHoodStatus(raw, 11).lightCeiling);
+  TEST_ASSERT_TRUE(decodeHoodStatus(raw, 17).lightCeiling);
+  raw[5] = 0x00;
+  raw[9] = 0x01;
+  TEST_ASSERT_FALSE(decodeHoodStatus(raw, 17).lightCeiling);
+}
+
+// The sync packet is only ever recognised by its first nine bytes, so a longer
+// frame is still a sync packet whatever it carries after them.
+void test_sync_packet_ignores_bytes_past_the_ninth(void) {
+  uint8_t raw[STATUS_MAX_LEN];
+  memset(raw, 0x11, sizeof(raw));
+  TEST_ASSERT_TRUE(isSyncPacket(raw));
+  raw[12] = 0x00;
+  TEST_ASSERT_TRUE(isSyncPacket(raw));
+  raw[8] = 0x00;
+  TEST_ASSERT_FALSE(isSyncPacket(raw));
+}
+
+// ----------------------------------------------------------------------------
 // parseStatusRaw
 // ----------------------------------------------------------------------------
 void test_parse_status_raw_round_trip(void) {
   uint8_t original[9] = {0x00, 0x01, 0x10, 0x09, 0x10, 0x90, 0x01, 0xAB, 0xFF};
-  char text[32];
-  snprintf(text, sizeof(text), "%02X %02X %02X %02X %02X %02X %02X %02X %02X",
-           original[0], original[1], original[2], original[3], original[4],
-           original[5], original[6], original[7], original[8]);
+  char text[STATUS_MAX_LEN * 3];
+  formatStatusRaw(original, 9, text, sizeof(text));
 
-  uint8_t parsed[9] = {0};
-  TEST_ASSERT_TRUE(parseStatusRaw(text, parsed));
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_EQUAL_size_t(9, parseStatusRaw(text, parsed, sizeof(parsed)));
   TEST_ASSERT_EQUAL_UINT8_ARRAY(original, parsed, 9);
 }
 
+void test_parse_status_raw_round_trip_long_frame(void) {
+  uint8_t original[STATUS_MAX_LEN] = {0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
+                                      0x00, 0x00, 0x01, 0x00, 0x00, 0x00};
+  char text[STATUS_MAX_LEN * 3];
+  formatStatusRaw(original, STATUS_MAX_LEN, text, sizeof(text));
+  TEST_ASSERT_EQUAL_STRING("00 00 00 00 10 00 00 00 00 01 00 00 00", text);
+
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_EQUAL_size_t(STATUS_MAX_LEN, parseStatusRaw(text, parsed, sizeof(parsed)));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(original, parsed, STATUS_MAX_LEN);
+}
+
 void test_parse_status_raw_lowercase(void) {
-  uint8_t parsed[9] = {0};
-  TEST_ASSERT_TRUE(parseStatusRaw("ab cd ef 00 11 22 33 44 55", parsed));
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_TRUE(parseStatusRaw("ab cd ef 00 11 22 33 44 55", parsed, sizeof(parsed)));
   TEST_ASSERT_EQUAL_UINT8(0xAB, parsed[0]);
   TEST_ASSERT_EQUAL_UINT8(0xEF, parsed[2]);
 }
 
 void test_parse_status_raw_too_few_bytes(void) {
-  uint8_t parsed[9] = {0};
-  TEST_ASSERT_FALSE(parseStatusRaw("00 00 00 00", parsed));
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("00 00 00 00", parsed, sizeof(parsed)));
 }
 
-void test_parse_status_raw_trailing_garbage(void) {
+void test_parse_status_raw_too_many_bytes(void) {
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw(
+    "00 00 00 00 00 00 00 00 00 00 00 00 00 00", parsed, sizeof(parsed)));
+}
+
+void test_parse_status_raw_rejects_frame_longer_than_buffer(void) {
   uint8_t parsed[9] = {0};
-  TEST_ASSERT_FALSE(parseStatusRaw("00 00 00 00 00 00 00 00 00 00", parsed));
+  TEST_ASSERT_FALSE(parseStatusRaw(
+    "00 00 00 00 10 00 00 00 00 01 00 00 00", parsed, sizeof(parsed)));
 }
 
 void test_parse_status_raw_non_hex(void) {
-  uint8_t parsed[9] = {0};
-  TEST_ASSERT_FALSE(parseStatusRaw("00 00 ZZ 00 00 00 00 00 00", parsed));
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("00 00 ZZ 00 00 00 00 00 00", parsed, sizeof(parsed)));
 }
 
 void test_parse_status_raw_leaves_out_untouched_on_failure(void) {
   uint8_t parsed[9] = {0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE};
-  TEST_ASSERT_FALSE(parseStatusRaw("11 22 33 44 55 66 77 88 ZZ", parsed));
+  TEST_ASSERT_FALSE(parseStatusRaw("11 22 33 44 55 66 77 88 ZZ", parsed, sizeof(parsed)));
   for (int i = 0; i < 9; i++) TEST_ASSERT_EQUAL_UINT8(0xEE, parsed[i]);
 }
 
 void test_parse_status_raw_empty_string(void) {
-  uint8_t parsed[9] = {0};
-  TEST_ASSERT_FALSE(parseStatusRaw("", parsed));
+  uint8_t parsed[STATUS_MAX_LEN] = {0};
+  TEST_ASSERT_FALSE(parseStatusRaw("", parsed, sizeof(parsed)));
 }
 
 // ----------------------------------------------------------------------------
@@ -342,10 +440,21 @@ int main(int, char**) {
   RUN_TEST(test_json_get_value_missing_key);
   RUN_TEST(test_json_get_value_buffer_too_small);
 
+  RUN_TEST(test_long_frame_all_off);
+  RUN_TEST(test_long_frame_light_down);
+  RUN_TEST(test_long_frame_light_ceiling);
+  RUN_TEST(test_long_frame_ignores_short_frame_ceiling_bit);
+  RUN_TEST(test_long_frame_both_lights);
+  RUN_TEST(test_long_frame_fan_steps);
+  RUN_TEST(test_unknown_frame_length_uses_short_layout);
+  RUN_TEST(test_sync_packet_ignores_bytes_past_the_ninth);
+
   RUN_TEST(test_parse_status_raw_round_trip);
+  RUN_TEST(test_parse_status_raw_round_trip_long_frame);
   RUN_TEST(test_parse_status_raw_lowercase);
   RUN_TEST(test_parse_status_raw_too_few_bytes);
-  RUN_TEST(test_parse_status_raw_trailing_garbage);
+  RUN_TEST(test_parse_status_raw_too_many_bytes);
+  RUN_TEST(test_parse_status_raw_rejects_frame_longer_than_buffer);
   RUN_TEST(test_parse_status_raw_non_hex);
   RUN_TEST(test_parse_status_raw_leaves_out_untouched_on_failure);
   RUN_TEST(test_parse_status_raw_empty_string);

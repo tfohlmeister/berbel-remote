@@ -10,10 +10,10 @@
  * BLE Protocol (reverse engineered):
  * - Button press:   [code, 0x00] as 2-byte notification on f004f002
  * - Button release: [0x00, 0x00] as 2-byte notification on f004f002
- * - Hood status:    9-byte writes from hood on f004f001
+ * - Hood status:    status writes from hood on f004f001
  * - Sync packet:    all 0x11 (ignored, sent on connect)
  *
- * Hood Status Bytes (first 9 bytes of the frame, bitmask-based):
+ * Hood Status Bytes (bitmask-based):
  *   Byte[0] & 0x10  = Fan Stufe 1
  *   Byte[1] & 0x01  = Fan Stufe 2
  *   Byte[1] & 0x10  = Fan Stufe 3
@@ -24,6 +24,11 @@
  *   Byte[5] & 0x01  = Deckenlicht (ceiling connection light)
  *   Byte[5] & 0x90  = Nachlauf (afterrun timer active)
  *   Byte[6] & 0x01  = Cover moving down (deploying)
+ *
+ * Frame length varies by model and not every flag sits in the same place: the
+ * BFB 6bT sends 9 bytes, the Skyline Edge Play 13 with the Deckenlicht on
+ * byte[9] instead of byte[5]. The positions live in the layout tables in
+ * berbel_protocol.h, which are picked by frame length.
  *
  * HA Entities (via MQTT Auto-Discovery):
  *   - Oberlicht       (light)          Toggle upper light
@@ -37,7 +42,7 @@
  *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_COVER)
  *   - BLE Verbindung  (binary_sensor)  BLE connection status
  *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_COVER)
- *   - Status Raw      (sensor)         Raw 9-byte hex for debugging
+ *   - Status Raw      (sensor)         Raw status frame as hex, for debugging
  *
  * Critical requirements:
  * 1. MAC must use Texas Instruments OUI (88:01:F9 or 30:AF:7E)
@@ -136,7 +141,8 @@ struct HoodState {
   const char* coverState = "up";  // up, moving up, moving down, down
 #endif
   bool bleConnected = false;
-  uint8_t raw[9] = {0};
+  uint8_t raw[berbel::STATUS_MAX_LEN] = {0};
+  size_t rawLen = 9;
 };
 
 // ============================================================================
@@ -177,7 +183,8 @@ bool hoodStateValid = false;  // true after first real status from hood (not syn
 
 // Status update from BLE callback (processed in loop)
 volatile bool newStatusReceived = false;
-uint8_t pendingStatus[9];
+uint8_t pendingStatus[berbel::STATUS_MAX_LEN];
+volatile size_t pendingStatusLen = 0;
 
 // Command queue (prevents commands from overlapping when scenes send multiple at once)
 struct CmdEntry {
@@ -454,11 +461,14 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
     }
     Log.println();
 
-    // Some models send a longer frame (the Skyline Edge Play sends 13 bytes)
-    // whose leading bytes carry the same fields. Anything past the ninth is not
-    // decoded yet.
+    // Models differ in frame length and in where they put some of the flags, so
+    // the length is kept and the decoder picks its layout from it. A frame longer
+    // than any layout covers is taken as the nine bytes every hood agrees on,
+    // rather than guessed at with the layout of a different model.
     if (value.length() >= 9) {
-      memcpy(pendingStatus, (const uint8_t*)value.data(), 9);
+      size_t len = value.length() <= berbel::STATUS_MAX_LEN ? value.length() : 9;
+      memcpy(pendingStatus, (const uint8_t*)value.data(), len);
+      pendingStatusLen = len;
       newStatusReceived = true;
     }
   }
@@ -533,6 +543,9 @@ void publishState() {
     return;
   }
 
+  char rawHex[berbel::STATUS_MAX_LEN * 3];
+  berbel::formatStatusRaw(hood.raw, hood.rawLen, rawHex, sizeof(rawHex));
+
   char json[384];
   snprintf(json, sizeof(json),
     "{"
@@ -548,7 +561,7 @@ void publishState() {
     "\"cover_state\":\"%s\","
 #endif
     "\"ble\":\"%s\","
-    "\"status_raw\":\"%02X %02X %02X %02X %02X %02X %02X %02X %02X\""
+    "\"status_raw\":\"%s\""
     "}",
     hood.lightUp ? "ON" : "OFF",
     hood.lightDown ? "ON" : "OFF",
@@ -562,8 +575,7 @@ void publishState() {
     hood.coverState,
 #endif
     hood.bleConnected ? "ON" : "OFF",
-    hood.raw[0], hood.raw[1], hood.raw[2], hood.raw[3], hood.raw[4],
-    hood.raw[5], hood.raw[6], hood.raw[7], hood.raw[8]);
+    rawHex);
 
   mqtt.publish(MQTT_STATE, json, true);
 }
@@ -775,7 +787,8 @@ void publishDiscovery() {
 // Restore hood state from retained MQTT message (simple JSON parser)
 // ============================================================================
 void restoreStateFromMqtt(const char* json) {
-  char val[32];
+  // Wide enough for the longest status_raw string (13 bytes as "XX " pairs).
+  char val[berbel::STATUS_MAX_LEN * 3];
 
   if (berbel::jsonGetValue(json, "light_up", val, sizeof(val)))
     hood.lightUp = (strcmp(val, "ON") == 0);
@@ -789,8 +802,10 @@ void restoreStateFromMqtt(const char* json) {
     hood.nachlauf = (strcmp(val, "ON") == 0);
   if (berbel::jsonGetValue(json, "fan_preset", val, sizeof(val)))
     hood.fanSpeed = berbel::fanPresetToSpeed(val);
-  if (berbel::jsonGetValue(json, "status_raw", val, sizeof(val)))
-    berbel::parseStatusRaw(val, hood.raw);
+  if (berbel::jsonGetValue(json, "status_raw", val, sizeof(val))) {
+    size_t len = berbel::parseStatusRaw(val, hood.raw, sizeof(hood.raw));
+    if (len > 0) hood.rawLen = len;
+  }
 #if HOOD_HAS_COVER
   if (berbel::jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
@@ -1272,9 +1287,10 @@ void loop() {
       Log.println("[HOOD] Sync packet ignored");
     } else {
       hoodStateValid = true;
-      memcpy(hood.raw, pendingStatus, 9);
+      hood.rawLen = pendingStatusLen;
+      memcpy(hood.raw, pendingStatus, hood.rawLen);
 
-      berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw);
+      berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw, hood.rawLen);
       hood.lightUp   = status.lightUp;
       hood.lightDown = status.lightDown;
 #if HOOD_HAS_CEILING_LIGHT

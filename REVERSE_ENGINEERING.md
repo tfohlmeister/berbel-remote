@@ -119,7 +119,7 @@ This is the proprietary service used for all communication between remote and ho
 
 | Handle | UUID | Properties | Direction | Description |
 |--------|------|------------|-----------|-------------|
-| 0x0032 | f004f001-...-berbel | read, write-without-response | Hood -> Remote | **Hood status** (9-byte state packets) |
+| 0x0032 | f004f001-...-berbel | read, write-without-response | Hood -> Remote | **Hood status** (9 or 13-byte state packets) |
 | 0x0034 | f004f002-...-berbel | read, notify | Remote -> Hood | **Button commands** (2-byte notifications) |
 
 UUID breakdown:
@@ -160,7 +160,11 @@ the unverified rows follow the manual's order either.
 
 ## Hood Status Protocol
 
-The hood writes 9-byte status packets to `f004f001`. All values are bitmask-based.
+The hood writes bitmask-based status packets to `f004f001`. **The frame length
+differs by model**, and so does the position of at least one flag, so the
+firmware picks a layout table by frame length (`berbel_protocol.h`).
+
+### 9-byte frame (BFB 6bT)
 
 | Byte | Mask | Meaning |
 |------|------|---------|
@@ -174,6 +178,32 @@ The hood writes 9-byte status packets to `f004f001`. All values are bitmask-base
 | [5] | 0x01 | Deckenlicht (ceiling connection light) |
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
 | [6] | 0x01 | Cover moving down (deploying) |
+
+### 13-byte frame (Skyline Edge Play)
+
+Measured in [issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3).
+The fan steps and the Unterlicht keep their positions; the Deckenlicht moves
+from byte [5] to byte [9].
+
+| Byte | Mask | Meaning | Measured |
+|------|------|---------|----------|
+| [0] | 0x10 | Fan Stufe 1 | yes |
+| [1] | 0x01 | Fan Stufe 2 | yes |
+| [1] | 0x10 | Fan Stufe 3 | yes |
+| [2] | 0x09 | Fan Power | no, carried over |
+| [2] | 0x10 | Oberlicht (upper light) | no, carried over |
+| [4] | 0x10 | Unterlicht (cooktop light) | yes |
+| [4] | 0x01 | Cover moving up (retracting) | no, carried over |
+| [9] | 0x01 | Deckenlicht (ceiling connection light) | yes |
+| [5] | 0x90 | Nachlauf (afterrun timer active) | no, carried over |
+| [6] | 0x01 | Cover moving down (deploying) | no, carried over |
+
+**Open question:** why the two layouts exist, and how the original remote tells
+them apart. Its buttons light up in sync with the hood, so it decodes the same
+frames and must be making the same distinction, whether by frame length, by a
+model identifier exchanged during pairing, or by shipping firmware per model.
+Anything measured on a third model is welcome, particularly the flags marked
+"carried over" above, which are assumed rather than confirmed.
 
 On connect, the hood sends a sync packet (all bytes `0x11`) which should be ignored.
 
