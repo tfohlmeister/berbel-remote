@@ -33,11 +33,11 @@
  *   - Luefter         (select)         Fan speed: Aus, Stufe 1-3, Power
  *   - Ausschalten     (button)         Power off (starts Nachlauf)
  *   - Nachlauf        (switch)         Toggle afterrun timer
- *   - Position        (select)         Oben/Unten (only with HOOD_HAS_COVER)
- *   - Hochfahren      (button)         Move up unconditionally (only with HOOD_HAS_COVER)
- *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_COVER)
+ *   - Position        (select)         Oben/Unten (only with HOOD_HAS_LIFT)
+ *   - Hochfahren      (button)         Move up unconditionally (only with HOOD_HAS_LIFT)
+ *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_LIFT)
  *   - BLE Verbindung  (binary_sensor)  BLE connection status
- *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_COVER)
+ *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_LIFT)
  *   - Status Raw      (sensor)         Raw 9-byte hex for debugging
  *
  * Critical requirements:
@@ -65,6 +65,22 @@
 // relying on the preprocessor treating the unknown name as 0.
 #ifndef HOOD_HAS_CEILING_LIGHT
 #define HOOD_HAS_CEILING_LIGHT false
+#endif
+
+// The lift was called "cover" here, after the Home Assistant domain rather than
+// after berbel's own term, and this firmware does not even use that domain. A
+// config.h written before the rename still says HOOD_HAS_COVER, so take its
+// value and point at the new name once, rather than silently dropping the lift
+// entities on the next update.
+#ifdef HOOD_HAS_COVER
+#warning "config.h: HOOD_HAS_COVER is deprecated, rename it to HOOD_HAS_LIFT"
+#ifndef HOOD_HAS_LIFT
+#define HOOD_HAS_LIFT HOOD_HAS_COVER
+#endif
+#endif
+
+#ifndef HOOD_HAS_LIFT
+#define HOOD_HAS_LIFT false
 #endif
 
 #ifndef HOOD_HAS_MULTI_BUTTON
@@ -124,7 +140,7 @@
 #define MQTT_CMD_FAN_PRESET MQTT_BASE "/fan/preset/set"
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
 #define MQTT_CMD_NACHLAUF   MQTT_BASE "/nachlauf/set"
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
 #define MQTT_CMD_POSITION   MQTT_BASE "/position/set"
 #define MQTT_CMD_MOVE_UP    MQTT_BASE "/move_up/set"
 #define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
@@ -145,8 +161,11 @@ struct HoodState {
 #endif
   uint8_t fanSpeed = 0;  // 0=off, 1-4
   bool nachlauf = false;  // timer/afterrun active
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   const char* position = "Oben";        // Oben, Unten, Fährt hoch, Fährt runter
+  // "cover" rather than "lift" throughout the state: the name reaches users as
+  // the `cover_state` MQTT field and entity id, so it cannot be changed without
+  // breaking their automations.
   const char* coverState = "up";  // up, moving up, moving down, down
 #endif
   bool bleConnected = false;
@@ -567,7 +586,7 @@ void processHoodStatus() {
   hood.fanSpeed  = status.fanSpeed;
   hood.nachlauf  = status.nachlauf;
 
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   berbel::CoverResult cover = berbel::nextCoverState(
     hood.coverState, hood.position, status.movingUp, status.movingDown);
   hood.coverState = cover.state;
@@ -604,7 +623,7 @@ void publishState() {
 #endif
     "\"fan_preset\":\"%s\","
     "\"nachlauf\":\"%s\","
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     "\"position\":\"%s\","
     "\"cover_state\":\"%s\","
 #endif
@@ -618,7 +637,7 @@ void publishState() {
 #endif
     berbel::fanPresetName(hood.fanSpeed),
     hood.nachlauf ? "ON" : "OFF",
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     hood.position,
     hood.coverState,
 #endif
@@ -662,7 +681,7 @@ void cleanupOldDiscovery() {
 #if !HOOD_HAS_MULTI_BUTTON
     "homeassistant/button/berbel_hood/multi/config",
 #endif
-#if !HOOD_HAS_COVER
+#if !HOOD_HAS_LIFT
     "homeassistant/select/berbel_hood/position/config",
     "homeassistant/button/berbel_hood/move_up/config",
     "homeassistant/button/berbel_hood/move_down/config",
@@ -727,7 +746,7 @@ void publishDiscovery() {
     "\"ic\":\"mdi:fan\""
   );
 
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   // Position (select: Oben/Unten)
   publishDiscoveryMsg(
     "homeassistant/select/berbel_hood/position/config",
@@ -810,7 +829,7 @@ void publishDiscovery() {
   );
 #endif
 
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   // Move Up button (unconditional)
   publishDiscoveryMsg(
     "homeassistant/button/berbel_hood/move_up/config",
@@ -876,7 +895,7 @@ void restoreStateFromMqtt(const char* json) {
     hood.fanSpeed = berbel::fanPresetToSpeed(val);
   if (berbel::jsonGetValue(json, "status_raw", val, sizeof(val)))
     berbel::parseStatusRaw(val, hood.raw);
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   if (berbel::jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
   if (berbel::jsonGetValue(json, "cover_state", val, sizeof(val))) {
@@ -889,7 +908,7 @@ void restoreStateFromMqtt(const char* json) {
 
   hoodStateValid = true;
   mqtt.unsubscribe(MQTT_STATE);
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   Log.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d pos=%s\n",
     hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf, hood.position);
 #else
@@ -994,7 +1013,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     queueButton(btnCode, btnName);
   }
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   // Position (Oben/Unten)
   else if (t == MQTT_CMD_POSITION) {
     if (strcmp(msg, "Oben") == 0)        queueButton(BTN_MOVE_UP, "Move Up");
@@ -1113,7 +1132,7 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_POWER);
     mqtt.subscribe(MQTT_CMD_NACHLAUF);
     mqtt.subscribe(MQTT_CMD_FAN_PRESET);
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     mqtt.subscribe(MQTT_CMD_POSITION);
     mqtt.subscribe(MQTT_CMD_MOVE_UP);
     mqtt.subscribe(MQTT_CMD_MOVE_DOWN);

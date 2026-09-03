@@ -72,7 +72,7 @@ for it and the findings are welcome in an issue.
 
    | Flag | Default | Set it when |
    |------|---------|-------------|
-   | `HOOD_HAS_COVER` | `true` | Your hood has no retractable cover (lift function): set `false` to drop the Position, Hochfahren, Herunterfahren and Cover State entities. |
+   | `HOOD_HAS_LIFT` | `true` | Your hood has no lift ("Liftfunktion Heben/Senken"): set `false` to drop the Position, Hochfahren, Herunterfahren and Cover State entities. Renamed from `HOOD_HAS_COVER`, which still works but warns at compile time. |
    | `HOOD_HAS_MULTI_BUTTON` | `false` | You assigned something to the multifunction button in the Berbel app: set `true` to add a Multifunktion button that presses it. |
    | `HOOD_HAS_CEILING_LIGHT` | `false` | Your hood has a ceiling connection with effect lighting (a third lamp) **and** the multifunction button is assigned to toggle it: set `true` to add the Deckenlicht entity. Any other assignment needs `HOOD_HAS_MULTI_BUTTON` instead, see [The multifunction button](#the-multifunction-button). |
 
@@ -121,11 +121,11 @@ All entities are created automatically via MQTT auto-discovery.
 | Lufter | Select | Fan speed: Aus, Stufe 1-3, Power |
 | Ausschalten | Button | Power off (starts afterrun timer) |
 | Nachlauf | Switch | Toggle afterrun timer |
-| Position | Select | Oben (retracted) / Unten (deployed) *(`HOOD_HAS_COVER` only)* |
-| Hochfahren | Button | Move up unconditionally *(`HOOD_HAS_COVER` only)* |
-| Herunterfahren | Button | Move down unconditionally *(`HOOD_HAS_COVER` only)* |
+| Position | Select | Oben (retracted) / Unten (deployed) *(`HOOD_HAS_LIFT` only)* |
+| Hochfahren | Button | Move up unconditionally *(`HOOD_HAS_LIFT` only)* |
+| Herunterfahren | Button | Move down unconditionally *(`HOOD_HAS_LIFT` only)* |
 | BLE Verbindung | Binary Sensor | BLE connection status (diagnostic) |
-| Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_COVER` only)* |
+| Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_LIFT` only)* |
 | Multifunktion | Button | Presses the multifunction key (only with `HOOD_HAS_MULTI_BUTTON`) |
 | Status Raw | Sensor | Raw 9-byte hex for debugging (diagnostic) |
 | Remote Log | Switch | Mirror the firmware log to MQTT (diagnostic) |
@@ -221,10 +221,10 @@ The hood sends 9-byte status packets on characteristic `f004f001-...-berbel`. Al
 | [2] | 0x09 | Fan Power |
 | [2] | 0x10 | Oberlicht (upper light) |
 | [4] | 0x10 | Unterlicht (cooktop light) |
-| [4] | 0x01 | Cover moving up (retracting) *(`HOOD_HAS_COVER` only)* |
+| [4] | 0x01 | Cover moving up (retracting) *(`HOOD_HAS_LIFT` only)* |
 | [5] | 0x01 | Deckenlicht (ceiling connection light) *(`HOOD_HAS_CEILING_LIGHT` only)* |
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
-| [6] | 0x01 | Cover moving down (deploying) *(`HOOD_HAS_COVER` only)* |
+| [6] | 0x01 | Cover moving down (deploying) *(`HOOD_HAS_LIFT` only)* |
 
 A sync packet (all bytes `0x11`) is sent on connect and should be ignored.
 

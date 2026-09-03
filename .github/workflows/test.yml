@@ -40,13 +40,16 @@ jobs:
       # passes CI and breaks only for the users who enable that flag.
       - name: Build firmware (all hood feature flag combinations)
         run: |
-          for cover in true false; do
+          for lift in true false; do
             for ceiling in true false; do
-              echo "::group::HOOD_HAS_COVER=$cover HOOD_HAS_CEILING_LIGHT=$ceiling"
-              sed -e "s/^#define HOOD_HAS_COVER .*/#define HOOD_HAS_COVER $cover/" \
-                  -e "s/^#define HOOD_HAS_CEILING_LIGHT .*/#define HOOD_HAS_CEILING_LIGHT $ceiling/" \
-                  BerbelRemote/src/config.example.h > BerbelRemote/src/config.h
-              pio run -e esp32dev -d BerbelRemote
-              echo "::endgroup::"
+              for multi in true false; do
+                echo "::group::HOOD_HAS_LIFT=$lift HOOD_HAS_CEILING_LIGHT=$ceiling HOOD_HAS_MULTI_BUTTON=$multi"
+                sed -e "s/^#define HOOD_HAS_LIFT .*/#define HOOD_HAS_LIFT $lift/" \
+                    -e "s/^#define HOOD_HAS_CEILING_LIGHT .*/#define HOOD_HAS_CEILING_LIGHT $ceiling/" \
+                    -e "s/^#define HOOD_HAS_MULTI_BUTTON .*/#define HOOD_HAS_MULTI_BUTTON $multi/" \
+                    BerbelRemote/src/config.example.h > BerbelRemote/src/config.h
+                pio run -e esp32dev -d BerbelRemote
+                echo "::endgroup::"
+              done
             done
           done
