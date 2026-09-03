@@ -142,10 +142,14 @@ struct CoverResult {
 // Next cover state given the previous state and the current moving flags.
 // When the hood is not moving, the state settles from "moving up/down" to
 // "up/down" and the position is carried over unchanged.
+// Deploying wins when both flags are set. A hood that starts from its parked
+// position drives down before the fan runs, and reports that with byte 4 and
+// byte 6 carrying the same value for the whole ten seconds it takes. Only a
+// button-driven move ever sets exactly one of them.
 inline CoverResult nextCoverState(const char* prevState, const char* prevPosition,
                                   bool movingUp, bool movingDown) {
-  if (movingUp)   return {"moving up", "Oben"};
   if (movingDown) return {"moving down", "Unten"};
+  if (movingUp)   return {"moving up", "Oben"};
   if (strcmp(prevState, "moving up") == 0)   return {"up", prevPosition};
   if (strcmp(prevState, "moving down") == 0) return {"down", prevPosition};
   return {prevState, prevPosition};

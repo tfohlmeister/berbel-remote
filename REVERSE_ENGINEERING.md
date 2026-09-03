@@ -179,6 +179,9 @@ firmware picks a layout table by frame length (`berbel_protocol.h`).
 | [5] | 0x90 | Nachlauf (afterrun timer active) |
 | [6] | 0x01 | Cover moving down (deploying) |
 
+Bytes [3], [7] and [8] are `0x00` in every frame observed so far, with one
+exception described below. Nothing decodes them.
+
 ### 13-byte frame (Skyline Edge Play)
 
 Measured in [issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3).
@@ -198,12 +201,61 @@ from byte [5] to byte [9].
 | [5] | 0x90 | Nachlauf (afterrun timer active) | no, carried over |
 | [6] | 0x01 | Cover moving down (deploying) | no, carried over |
 
+In the frames measured so far, bytes [3], [7], [8] and the four extra bytes
+[10] to [12] were always `0x00`. Whether byte [3] behaves on this model as it
+does on the short frame (see below) has not been observed.
+
 **Open question:** why the two layouts exist, and how the original remote tells
 them apart. Its buttons light up in sync with the hood, so it decodes the same
 frames and must be making the same distinction, whether by frame length, by a
 model identifier exchanged during pairing, or by shipping firmware per model.
 Anything measured on a third model is welcome, particularly the flags marked
 "carried over" above, which are assumed rather than confirmed.
+
+### Byte [3]: seen but not understood
+
+`byte[3]` takes the value `0xD0` during one specific phase and is `0x00` at
+every other moment, including all button-driven cover moves, every fan level,
+both lights and the afterrun. The phase is the automatic descent a lift model
+performs when the fan is switched on from the parked position, and even there
+the byte does not stay set: it appears, clears, and appears again while the
+hood is moving.
+
+What it means is unknown. It is not a position: the value never varies with how
+far the hood has travelled, and it is absent from the button-driven moves that
+cover the same distance. Nor is it a direction, since it never accompanies a
+retraction. It behaves more like a transient mode or status marker for the
+"deploy before running" sequence than like a field with a value.
+
+The firmware ignores it. It is recorded here because it is the only byte in the
+frame that is known to carry information we cannot read, and because a hood
+that reports an absolute position would most plausibly do it here.
+
+### Cover movement on the lift models
+
+A button-driven move sets exactly one of the two movement flags. Starting the
+fan from the parked position is different: the hood drives down first, and for
+the roughly ten seconds that takes, byte [4] and byte [6] carry the **same**
+value, first `0x0D` and then `0x01`. Both flags set therefore means deploying,
+never retracting, and the decoder gives byte [6] priority for that reason.
+
+Measured on a BFB 6bT with lift, fan switched to Stufe 1 from the parked
+position:
+
+```
+10 00 00 D0 00 00 00 00 00
+10 00 00 D0 0D 00 0D 00 00
+10 00 00 00 0D 00 0D 00 00
+10 00 00 00 01 00 01 00 00
+10 00 00 D0 01 00 01 00 00
+10 00 00 00 00 00 00 00 00   <- ten seconds later, hood is down
+```
+
+Note the `0xD0` in `byte[3]` above, which is the only place it ever shows up.
+
+No frame carries an absolute position, so "up" and "down" are inferred from the
+direction of the last movement rather than read from the hood. Switching the
+hood off produces no movement frames at all: it does not retract on its own.
 
 On connect, the hood sends a sync packet (all bytes `0x11`) which should be ignored.
 
