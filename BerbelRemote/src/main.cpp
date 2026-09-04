@@ -302,8 +302,8 @@ public:
 
     for (size_t i = 0; i < len; i++) {
       char c = (char)data[i];
-      // \r ends a line too: progress output that only ever returns the cursor
-      // would otherwise fill the buffer until the rest is silently dropped.
+      // \r ends a line too: output that only ever returns the cursor would
+      // otherwise fill the buffer until the rest is silently dropped.
       if (c == '\n' || c == '\r') {
         queueLine();
       } else if (m_partialLen < LOG_LINE_MAX - 1) {
@@ -1188,7 +1188,11 @@ void setupWiFi() {
     esp_coex_preference_set(ESP_COEX_PREFER_BT);
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Log.printf("[OTA] %u%%\r", progress * 100 / total);
+    // Straight to the console rather than through Log: this fires once per
+    // received chunk, and loop() cannot drain the log queue while an update is
+    // running, so every one of those lines would land in a queue that overflows
+    // and takes the lines worth keeping with it.
+    Serial.printf("[OTA] %u%%\r", progress * 100 / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Log.printf("[OTA] Error %u\n", error);
