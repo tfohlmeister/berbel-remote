@@ -67,10 +67,11 @@ static const StatusLayout LAYOUT_SHORT = {
   /* movingDown   */ {6, 0x01},
 };
 
-// 13-byte frame (Skyline Edge Play). The three fan steps and Unterlicht sit where
-// the short frame puts them, and the Deckenlicht has moved from byte 5 to byte 9;
-// those five are measured (issue #3). The remaining fields are carried over from
-// the short layout and are NOT confirmed on this frame.
+// 13-byte frame (Skyline Edge Play). Everything except Fan Power is confirmed on
+// such a hood: the fan steps, both lights, the lift flags and the Deckenlicht on
+// byte 9 come from issue #3, and berbel-ha, an independent integration for the
+// same hoods, decodes the lights, fan steps and Nachlauf at the same offsets.
+// Fan Power is carried over from the short layout and remains unverified.
 static const StatusLayout LAYOUT_LONG = {
   /* fanStep1     */ {0, 0x10},
   /* fanStep2     */ {1, 0x01},

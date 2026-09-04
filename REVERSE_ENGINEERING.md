@@ -185,8 +185,26 @@ two channels, so the app is a legitimate source for codes the remote's manual
 does not name. `0012` for the Deckenlicht was found precisely this way and then
 confirmed on the hood.
 
-`f006f006` is a different matter: colour is written as a 31-byte payload with
-RGB in it, not as a button code, and this firmware does not speak that.
+### Do not drive a hood through `f006f006`
+
+`f006f006` is a different matter. Colour and brightness are written there as
+31-byte payloads rather than button codes, and this firmware does not speak it.
+
+**It is also reported to crash the hood.** @jens-42 found that controlling a
+Skyline Edge Play over `f006f006` "frequently leads to crashes, requiring me to
+flip the circuit breaker to restart the unit", with gesture control (the laser
+dot) dead until then. The two-byte writes to `f006f004` are, in his words,
+"absolutely reliable". One reporter, one hood, and nothing here reproduces it,
+but the failure mode is bad enough to take at face value.
+
+This firmware never writes to `f006f006`, so nobody using it is exposed. It
+matters if you are tempted to add colour support: that is the channel you would
+need, and this is the risk that comes with it.
+
+[berbel-ha](https://github.com/dirkbloessl/berbel-ha) sends all of its light
+**and fan** commands over `f006f006` (`WRITE_COMMANDS` in its `const.py`). Its
+status parsing is independently useful and agrees with ours; its command path is
+the one the report above is about.
 
 ## Hood Status Protocol
 
@@ -218,18 +236,26 @@ Measured in [issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3).
 The fan steps and the Unterlicht keep their positions; the Deckenlicht moves
 from byte [5] to byte [9].
 
-| Byte | Mask | Meaning | Measured |
-|------|------|---------|----------|
-| [0] | 0x10 | Fan Stufe 1 | yes |
-| [1] | 0x01 | Fan Stufe 2 | yes |
-| [1] | 0x10 | Fan Stufe 3 | yes |
-| [2] | 0x09 | Fan Power | no, carried over |
-| [2] | 0x10 | Oberlicht (upper light) | no, carried over |
-| [4] | 0x10 | Unterlicht (cooktop light) | yes |
-| [4] | 0x01 | Cover moving up (retracting) | no, carried over |
-| [9] | 0x01 | Deckenlicht (ceiling connection light) | yes |
-| [5] | 0x90 | Nachlauf (afterrun timer active) | no, carried over |
-| [6] | 0x01 | Cover moving down (deploying) | no, carried over |
+| Byte | Mask | Meaning | Confirmed on a 13-byte hood |
+|------|------|---------|------------------------------|
+| [0] | 0x10 | Fan Stufe 1 | yes, issue #3 and berbel-ha |
+| [1] | 0x01 | Fan Stufe 2 | yes, issue #3 and berbel-ha |
+| [1] | 0x10 | Fan Stufe 3 | yes, issue #3 and berbel-ha |
+| [2] | 0x09 | Fan Power | **no, carried over from the 9-byte layout** |
+| [2] | 0x10 | Oberlicht (upper light) | yes, berbel-ha |
+| [4] | 0x10 | Unterlicht (cooktop light) | yes, issue #3 and berbel-ha |
+| [4] | 0x01 | Cover moving up (retracting) | yes, issue #3 |
+| [9] | 0x01 | Deckenlicht (ceiling connection light) | yes, issue #3 |
+| [5] | 0x90 | Nachlauf (afterrun timer active) | yes, berbel-ha |
+| [6] | 0x01 | Cover moving down (deploying) | yes, issue #3 |
+
+Fan Power is the only field still taken from the 9-byte layout without a
+measurement to back it. [berbel-ha](https://github.com/dirkbloessl/berbel-ha)
+(MIT), an independent Home Assistant integration for the Skyline Edge Base that
+reverse engineered the same hoods through a different channel, has it as
+`FAN_LEVEL_4 = 0x19  # Unknown (no level 4 available)`, so nobody has pinned it
+down. Everything else in its `parser.py` agrees byte for byte and mask for mask
+with the table above, which is where the "berbel-ha" confirmations come from.
 
 In the frames measured so far, bytes [3], [7], [8] and the four extra bytes
 [10] to [12] were always `0x00`. Whether byte [3] behaves on this model as it

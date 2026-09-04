@@ -44,15 +44,20 @@ Those hoods accept the 6bT's button codes for everything both remotes share.
 Their ceiling light is the exception: it sits on its own code `0x12` rather than
 on the multifunction key, which is what the define above is for.
 
-They also send a 13-byte status frame instead of 9, which this firmware decodes,
-**but only partly verified**: the fan steps, Unterlicht and Deckenlicht were
-measured on a Skyline Edge Play, while Oberlicht, Fan Power, Nachlauf and the two
-lift flags are assumed to sit where the 9-byte frame puts them. If one of those
-entities reads wrong on your hood, that assumption is why, and
-[REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) marks which is which.
+They also send a 13-byte status frame instead of 9, which this firmware decodes.
+Every field in it has been confirmed on such a hood except **Fan Power**, which
+is carried over from the 9-byte layout and may sit elsewhere. See
+[REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) for the table and where each
+confirmation comes from.
 
-All of it comes from [issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3),
-measured on a Skyline Edge Play. The Base was never tested.
+All of the above was measured on a Skyline Edge **Play**. The Base was never
+tested here, though the independent [berbel-ha](https://github.com/dirkbloessl/berbel-ha)
+integration decodes the same status offsets on one.
+
+> **Do not control these hoods through characteristic `f006f006`.** It is the
+> colour and brightness channel, and driving a Skyline Edge Play over it has been
+> reported to crash the hood until the circuit breaker is flipped. This firmware
+> never writes there. It is worth knowing before you extend it.
 
 What this firmware cannot reach on them: the 7bT has **19 buttons against the
 6bT's 13**, and the extra ones are colour temperature per light, Motion-Lights
