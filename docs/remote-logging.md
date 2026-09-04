@@ -50,11 +50,11 @@ Every line carries the subsystem that wrote it:
 
 | Prefix | What it covers |
 |--------|----------------|
-| `[BLE]` | Connects, disconnects with the decoded reason code, pairing result, advertising |
+| `[BLE]` | Connects, disconnects with the decoded reason code, pairing result, connection parameters, advertising |
 | `[HOOD]` | Raw 9-byte status packets from the hood |
 | `[MQTT]` | Broker connect, incoming commands, state restore |
 | `[CMD]` / `[BTN]` | Queued and sent button codes |
-| `[SYS]` | Free heap plus BLE and WiFi state, every 30 s |
+| `[SYS]` | Free heap plus BLE and WiFi state, every 30 s; while connected also the RSSI of the link to the hood |
 | `[WiFi]` / `[OTA]` / `[MAC]` | Startup and update plumbing |
 | `[LOG]` | The logging itself, including dropped lines |
 
@@ -63,10 +63,18 @@ A healthy reconnect reads like this:
 ```
 [BLE] Hood connected!
 [BLE] Peer 84:f7:xx:xx:xx:xx, encrypted=0 bonded=0
+[BLE] Conn params: interval 45 ms, latency 0, supervision timeout 2000 ms
 [BLE] Authentication complete: encrypted=1 bonded=1
 [HOOD] Status (9 bytes): 11 11 11 11 11 11 11 11 11
 [HOOD] Sync packet ignored
+[BLE] Asking for a supervision timeout of 6000 ms
+[BLE] Conn params now: interval 45 ms, latency 0, supervision timeout 6000 ms
 ```
+
+The last two lines are the firmware asking the hood to hold the link open longer
+before giving up on it, so a few missed connection events no longer end in
+`[BLE] Disconnect: HCI 0x08`. The hood may refuse, which shows up as
+`Conn update rejected` and costs nothing.
 
 `encrypted=1 bonded=1` means the bond from pairing was resumed. A disconnect
 names its cause:

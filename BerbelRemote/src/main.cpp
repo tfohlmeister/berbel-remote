@@ -203,6 +203,27 @@ NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pNotifyChar = nullptr;
 volatile bool deviceConnected = false;
 bool oldDeviceConnected = false;
+volatile uint16_t hoodConnHandle = BLE_HS_CONN_HANDLE_NONE;
+
+// A supervision timeout (HCI 0x08) means the hood and the ESP32 lost sight of
+// each other for that long. The hood picks the value when it connects and picks
+// it short, so a handful of missed connection events is enough to drop the
+// link. Ask it for a longer one; it is free to refuse. In 10 ms units, 0 to not
+// ask at all.
+#ifndef BLE_SUPERVISION_TIMEOUT
+#define BLE_SUPERVISION_TIMEOUT 600
+#endif
+static_assert(BLE_SUPERVISION_TIMEOUT == 0 ||
+              (BLE_SUPERVISION_TIMEOUT >= 10 && BLE_SUPERVISION_TIMEOUT <= 3200),
+              "BLE_SUPERVISION_TIMEOUT is in 10 ms units, the spec allows 10 to 3200");
+
+// A central may ignore a parameter update that arrives while it is still
+// setting the connection up, so the request waits until pairing and the first
+// status frame are through.
+#define CONN_PARAM_DELAY_MS 3000
+#define CONN_PARAM_MAX_TRIES 3
+volatile unsigned long connectedAt = 0;
+volatile uint8_t connParamTries = 0;
 
 // The raw advertising payload lives only in the controller - NimBLE keeps no
 // copy of custom advertising data and does not re-apply it after a host reset,
@@ -460,11 +481,55 @@ static int gapEventLogger(ble_gap_event* event, void* arg) {
         logGapStatus("Encryption failed", event->enc_change.status);
       }
       break;
+    case BLE_GAP_EVENT_CONN_UPDATE: {
+      ble_gap_conn_desc desc;
+      if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
+        Log.printf("[BLE] Conn params now: interval %u ms, latency %u, supervision timeout %u ms\n",
+                      (unsigned)desc.conn_itvl * 5 / 4, (unsigned)desc.conn_latency,
+                      (unsigned)desc.supervision_timeout * 10);
+      }
+      if (event->conn_update.status != 0) {
+        logGapStatus("Conn update rejected", event->conn_update.status);
+      }
+      break;
+    }
     default:
       break;
   }
   return 0;
 }
+
+// ============================================================================
+// Connection Parameters
+// ============================================================================
+// Only the supervision timeout is raised; interval and latency stay as the hood
+// set them, so its own timing is untouched.
+#if BLE_SUPERVISION_TIMEOUT
+// Returns false only when the request could not be handed to the stack, which
+// is worth another try; the hood's own answer arrives as a GAP event.
+static bool requestLongerSupervisionTimeout() {
+  ble_gap_conn_desc desc;
+  if (ble_gap_conn_find(hoodConnHandle, &desc) != 0) return true;
+  if (desc.supervision_timeout >= BLE_SUPERVISION_TIMEOUT) return true;
+
+  ble_gap_upd_params params = {};
+  params.itvl_min = desc.conn_itvl;
+  params.itvl_max = desc.conn_itvl;
+  params.latency = desc.conn_latency;
+  params.supervision_timeout = BLE_SUPERVISION_TIMEOUT;
+  params.min_ce_len = BLE_GAP_INITIAL_CONN_MIN_CE_LEN;
+  params.max_ce_len = BLE_GAP_INITIAL_CONN_MAX_CE_LEN;
+
+  int rc = ble_gap_update_params(hoodConnHandle, &params);
+  if (rc == 0) {
+    Log.printf("[BLE] Asking for a supervision timeout of %u ms\n",
+                  (unsigned)BLE_SUPERVISION_TIMEOUT * 10);
+    return true;
+  }
+  Log.printf("[BLE] Supervision timeout request failed, rc=%d\n", rc);
+  return false;
+}
+#endif
 
 // ============================================================================
 // BLE Callbacks
@@ -476,9 +541,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
   }
 
   void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) override {
+    connectedAt = millis();
+    connParamTries = 0;
+    hoodConnHandle = desc->conn_handle;  // last: gates the request in loop()
     Log.printf("[BLE] Peer %s, encrypted=%d bonded=%d\n",
                   NimBLEAddress(desc->peer_ota_addr).toString().c_str(),
                   desc->sec_state.encrypted, desc->sec_state.bonded);
+    Log.printf("[BLE] Conn params: interval %u ms, latency %u, supervision timeout %u ms\n",
+                  (unsigned)desc->conn_itvl * 5 / 4, (unsigned)desc->conn_latency,
+                  (unsigned)desc->supervision_timeout * 10);
   }
 
   void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
@@ -488,9 +559,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
   void onDisconnect(NimBLEServer* pServer) override {
     deviceConnected = false;
+    hoodConnHandle = BLE_HS_CONN_HANDLE_NONE;
     Log.println("[BLE] Hood disconnected");
-    delay(100);
-    startAdvertising();
+    // Leave the restart to the watchdog in loop(): startAdvertising() belongs
+    // to that task and must not run in the NimBLE host task at the same time.
+    // Due about 100 ms from now, later if the loop is stuck in a blocking
+    // reconnect. NimBLE restarts advertising by itself with the payload it
+    // cached, so only the re-assert after a host reset waits on this.
+    lastAdvReassert = millis() - ADV_REASSERT_MS + 100;
   }
 };
 
@@ -1215,7 +1291,14 @@ void setup() {
   Log.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("");
 
-  Log.printf("[BLE] MAC: %s\n", NimBLEDevice::getAddress().toString().c_str());
+  // The ESP-IDF default is +3 dBm, and a link that dies of a supervision
+  // timeout is a link without margin. +9 dBm is the highest level every ESP32
+  // variant offers.
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9);
+
+  Log.printf("[BLE] MAC: %s, TX power %d dBm\n",
+                NimBLEDevice::getAddress().toString().c_str(),
+                NimBLEDevice::getPower());
 
   // Security: Legacy Pairing, LTK only (no IRK)
   NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND);
@@ -1335,9 +1418,18 @@ void loop() {
   unsigned long now = millis();
   if (now - lastHeapLog > 30000) {
     lastHeapLog = now;
-    Log.printf("[SYS] Free heap: %u bytes, BLE: %s, WiFi: %s\n",
+    // The RSSI is what tells a link lost to distance or interference from one
+    // lost with the hood in plain sight.
+    char rssiText[20] = "";
+    int8_t rssi = 0;
+    if (deviceConnected && hoodConnHandle != BLE_HS_CONN_HANDLE_NONE &&
+        ble_gap_conn_rssi(hoodConnHandle, &rssi) == 0) {
+      snprintf(rssiText, sizeof(rssiText), " (%d dBm)", rssi);
+    }
+    Log.printf("[SYS] Free heap: %u bytes, BLE: %s%s, WiFi: %s\n",
       esp_get_free_heap_size(),
       deviceConnected ? "connected" : "waiting",
+      rssiText,
       wifiStarted ? (WiFi.status() == WL_CONNECTED ? "connected" : "disconnected") : "off");
   }
 
@@ -1403,6 +1495,22 @@ void loop() {
     publishState();
     oldDeviceConnected = deviceConnected;
   }
+
+  // --- Connection parameters (once per connection, after it has settled) ---
+  // millis() rather than `now`: mqttReconnect() blocks this loop for seconds
+  // with the broker down, and a connection that came up during such a stall
+  // would look like one that settled long ago.
+#if BLE_SUPERVISION_TIMEOUT
+  if (deviceConnected && connParamTries < CONN_PARAM_MAX_TRIES &&
+      hoodConnHandle != BLE_HS_CONN_HANDLE_NONE &&
+      millis() - connectedAt > CONN_PARAM_DELAY_MS) {
+    connectedAt = millis();  // space out a retry
+    connParamTries++;
+    if (requestLongerSupervisionTimeout()) {
+      connParamTries = CONN_PARAM_MAX_TRIES;  // nothing left to ask for
+    }
+  }
+#endif
 
   // --- Advertising watchdog ---
   if (!deviceConnected && now - lastAdvReassert > ADV_REASSERT_MS) {
