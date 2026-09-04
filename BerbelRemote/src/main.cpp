@@ -34,14 +34,15 @@
  *   - Oberlicht       (light)          Toggle upper light
  *   - Unterlicht      (light)          Toggle lower light
  *   - Deckenlicht     (light)          Toggle ceiling connection light (only with HOOD_HAS_CEILING_LIGHT)
+ *   - Multifunktion   (button)         Press the multifunction key (only with HOOD_HAS_MULTI_BUTTON)
  *   - Luefter         (select)         Fan speed: Aus, Stufe 1-3, Power
  *   - Ausschalten     (button)         Power off (starts Nachlauf)
  *   - Nachlauf        (switch)         Toggle afterrun timer
- *   - Position        (select)         Oben/Unten (only with HOOD_HAS_COVER)
- *   - Hochfahren      (button)         Move up unconditionally (only with HOOD_HAS_COVER)
- *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_COVER)
+ *   - Position        (select)         Oben/Unten (only with HOOD_HAS_LIFT)
+ *   - Hochfahren      (button)         Move up unconditionally (only with HOOD_HAS_LIFT)
+ *   - Herunterfahren  (button)         Move down unconditionally (only with HOOD_HAS_LIFT)
  *   - BLE Verbindung  (binary_sensor)  BLE connection status
- *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_COVER)
+ *   - Cover State     (sensor)         Diagnostic: up/moving up/moving down/down (only with HOOD_HAS_LIFT)
  *   - Status Raw      (sensor)         Raw status frame as hex, for debugging
  *
  * Critical requirements:
@@ -71,6 +72,26 @@
 #define HOOD_HAS_CEILING_LIGHT false
 #endif
 
+// The lift was called "cover" here, after the Home Assistant domain rather than
+// after berbel's own term, and this firmware does not even use that domain. A
+// config.h written before the rename still says HOOD_HAS_COVER, so take its
+// value and point at the new name once, rather than silently dropping the lift
+// entities on the next update.
+#ifdef HOOD_HAS_COVER
+#warning "config.h: HOOD_HAS_COVER is deprecated, rename it to HOOD_HAS_LIFT"
+#ifndef HOOD_HAS_LIFT
+#define HOOD_HAS_LIFT HOOD_HAS_COVER
+#endif
+#endif
+
+#ifndef HOOD_HAS_LIFT
+#define HOOD_HAS_LIFT false
+#endif
+
+#ifndef HOOD_HAS_MULTI_BUTTON
+#define HOOD_HAS_MULTI_BUTTON false
+#endif
+
 // Whether remote logging starts enabled. The retained MQTT state overrides this
 // on boot, so a device that was switched on stays on across a reboot.
 #ifndef REMOTE_LOG_DEFAULT
@@ -97,9 +118,15 @@
 #define BTN_RECIRC      0x08
 #define BTN_MOVE_UP     0x09
 #define BTN_LIGHT_DOWN  0x0A
-#define BTN_MULTI       0x0B  // multifunction, drives the ceiling connection light
+#define BTN_MULTI       0x0B  // does whatever the Berbel app assigned to it
 #define BTN_TIMER       0x0C
 #define BTN_MOVE_DOWN   0x0D
+
+// How long a button is held down. The original remote is not this precise, but
+// every function reacts to a short press. The debug topic can override it, for
+// hoods whose multifunction button may want a longer one.
+#define BTN_HOLD_MS     100
+#define BTN_HOLD_MAX_MS 5000
 
 // ============================================================================
 // MQTT Topics
@@ -112,10 +139,13 @@
 #if HOOD_HAS_CEILING_LIGHT
 #define MQTT_CMD_LIGHT_CEILING MQTT_BASE "/light_ceiling/set"
 #endif
+#if HOOD_HAS_MULTI_BUTTON
+#define MQTT_CMD_MULTI      MQTT_BASE "/multi/set"
+#endif
 #define MQTT_CMD_FAN_PRESET MQTT_BASE "/fan/preset/set"
 #define MQTT_CMD_POWER      MQTT_BASE "/power/set"
 #define MQTT_CMD_NACHLAUF   MQTT_BASE "/nachlauf/set"
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
 #define MQTT_CMD_POSITION   MQTT_BASE "/position/set"
 #define MQTT_CMD_MOVE_UP    MQTT_BASE "/move_up/set"
 #define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
@@ -136,8 +166,11 @@ struct HoodState {
 #endif
   uint8_t fanSpeed = 0;  // 0=off, 1-4
   bool nachlauf = false;  // timer/afterrun active
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   const char* position = "Oben";        // Oben, Unten, Fährt hoch, Fährt runter
+  // "cover" rather than "lift" throughout the state: the name reaches users as
+  // the `cover_state` MQTT field and entity id, so it cannot be changed without
+  // breaking their automations.
   const char* coverState = "up";  // up, moving up, moving down, down
 #endif
   bool bleConnected = false;
@@ -190,6 +223,7 @@ volatile size_t pendingStatusLen = 0;
 struct CmdEntry {
   uint8_t code;
   char name[16];
+  uint16_t holdMs;
 };
 #define CMD_QUEUE_SIZE 16
 #define CMD_DELAY_MS 300  // minimum ms between button presses
@@ -339,8 +373,9 @@ static uint8_t raw_adv_data[] = {
 // ============================================================================
 // Forward Declarations
 // ============================================================================
-void sendButton(uint8_t code, const char* name);
-void queueButton(uint8_t code, const char* name);
+void sendButton(uint8_t code, const char* name, uint16_t holdMs = BTN_HOLD_MS);
+void processHoodStatus();
+void queueButton(uint8_t code, const char* name, uint16_t holdMs = BTN_HOLD_MS);
 void processCmdQueue();
 void publishState();
 void publishDiscovery();
@@ -477,19 +512,28 @@ class WriteCallbacks : public NimBLECharacteristicCallbacks {
 // ============================================================================
 // Send Button Press/Release via BLE
 // ============================================================================
-void sendButton(uint8_t code, const char* name) {
+void sendButton(uint8_t code, const char* name, uint16_t holdMs) {
   if (!deviceConnected || !pNotifyChar) {
     Log.printf("[BTN] Cannot send %s - not connected\n", name);
     return;
   }
 
-  Log.printf("[BTN] Sending: %s (0x%02X)\n", name, code);
+  Log.printf("[BTN] Sending: %s (0x%02X), holding %u ms\n", name, code, holdMs);
 
   uint8_t press[] = {code, 0x00};
   pNotifyChar->setValue(press, 2);
   pNotifyChar->notify();
 
-  delay(100);
+  // Blocks the loop for the hold time, so MQTT and OTA stall meanwhile. Fine at
+  // the default; the cap keeps a debug press from stalling them long enough to
+  // drop the broker connection. Status frames are drained as they arrive, so a
+  // long press does not swallow the transitions it was sent to observe.
+  unsigned long holdUntil = millis() + holdMs;
+  while ((long)(millis() - holdUntil) < 0) {
+    delay(10);
+    processHoodStatus();
+    publishPendingLogs();  // otherwise the whole hold shows up at its end
+  }
 
   uint8_t release[] = {0x00, 0x00};
   pNotifyChar->setValue(release, 2);
@@ -499,7 +543,7 @@ void sendButton(uint8_t code, const char* name) {
 // ============================================================================
 // Command Queue (space out BLE commands for reliability)
 // ============================================================================
-void queueButton(uint8_t code, const char* name) {
+void queueButton(uint8_t code, const char* name, uint16_t holdMs) {
   int next = (cmdQueueHead + 1) % CMD_QUEUE_SIZE;
   if (next == cmdQueueTail) {
     Log.printf("[CMD] Queue full, dropping: %s\n", name);
@@ -508,6 +552,7 @@ void queueButton(uint8_t code, const char* name) {
   cmdQueue[cmdQueueHead].code = code;
   strncpy(cmdQueue[cmdQueueHead].name, name, sizeof(cmdQueue[cmdQueueHead].name) - 1);
   cmdQueue[cmdQueueHead].name[sizeof(cmdQueue[cmdQueueHead].name) - 1] = '\0';
+  cmdQueue[cmdQueueHead].holdMs = holdMs;
   cmdQueueHead = next;
   int pending = (cmdQueueHead - cmdQueueTail + CMD_QUEUE_SIZE) % CMD_QUEUE_SIZE;
   Log.printf("[CMD] Queued: %s (0x%02X), pending: %d\n", name, code, pending);
@@ -521,9 +566,48 @@ void processCmdQueue() {
   if (now - lastCmdSent < CMD_DELAY_MS) return;  // wait between commands
 
   CmdEntry& cmd = cmdQueue[cmdQueueTail];
-  sendButton(cmd.code, cmd.name);
+  sendButton(cmd.code, cmd.name, cmd.holdMs);
   cmdQueueTail = (cmdQueueTail + 1) % CMD_QUEUE_SIZE;
-  lastCmdSent = millis();  // after sendButton (includes 100ms delay)
+  lastCmdSent = millis();  // after sendButton, which includes the hold time
+}
+
+// ============================================================================
+// Hood Status Processing
+// ============================================================================
+// `pendingStatus` is a single slot the NimBLE task overwrites, so a frame is
+// lost unless this runs between two of them. Called from loop() and from
+// sendButton() while a button is held down.
+void processHoodStatus() {
+  if (!newStatusReceived) return;
+  newStatusReceived = false;
+
+  // Skip the sync packet (all 0x11) entirely
+  if (berbel::isSyncPacket(pendingStatus)) {
+    Log.println("[HOOD] Sync packet ignored");
+    return;
+  }
+
+  hoodStateValid = true;
+  hood.rawLen = pendingStatusLen;
+  memcpy(hood.raw, pendingStatus, hood.rawLen);
+
+  berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw, hood.rawLen);
+  hood.lightUp   = status.lightUp;
+  hood.lightDown = status.lightDown;
+#if HOOD_HAS_CEILING_LIGHT
+  hood.lightCeiling = status.lightCeiling;
+#endif
+  hood.fanSpeed  = status.fanSpeed;
+  hood.nachlauf  = status.nachlauf;
+
+#if HOOD_HAS_LIFT
+  berbel::CoverResult cover = berbel::nextCoverState(
+    hood.coverState, hood.position, status.movingUp, status.movingDown);
+  hood.coverState = cover.state;
+  hood.position = cover.position;
+#endif
+
+  publishState();
 }
 
 // ============================================================================
@@ -556,7 +640,7 @@ void publishState() {
 #endif
     "\"fan_preset\":\"%s\","
     "\"nachlauf\":\"%s\","
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     "\"position\":\"%s\","
     "\"cover_state\":\"%s\","
 #endif
@@ -570,7 +654,7 @@ void publishState() {
 #endif
     berbel::fanPresetName(hood.fanSpeed),
     hood.nachlauf ? "ON" : "OFF",
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     hood.position,
     hood.coverState,
 #endif
@@ -597,15 +681,27 @@ void publishDiscoveryMsg(const char* topic, const char* fields) {
 }
 
 void cleanupOldDiscovery() {
-  // Remove old entity configs that no longer exist (empty payload = delete)
+  // Remove entity configs that should not exist (empty payload = delete).
+  // Discovery messages are retained, so an entity a previous build registered
+  // outlives the build: turning a feature off again is not enough to make it
+  // disappear, someone has to say so. Every optional entity is listed here
+  // under the negated flag that creates it.
   const char* oldTopics[] = {
+    // Entities from earlier versions of this firmware
     "homeassistant/fan/berbel_hood/fan/config",
     "homeassistant/binary_sensor/berbel_hood/nachlauf/config",
     "homeassistant/cover/berbel_hood/cover/config",
 #if !HOOD_HAS_CEILING_LIGHT
-    // Feature disabled again: drop the entity a previous build registered,
-    // otherwise it lingers in HA as a toggle nothing listens to.
     "homeassistant/light/berbel_hood/light_ceiling/config",
+#endif
+#if !HOOD_HAS_MULTI_BUTTON
+    "homeassistant/button/berbel_hood/multi/config",
+#endif
+#if !HOOD_HAS_LIFT
+    "homeassistant/select/berbel_hood/position/config",
+    "homeassistant/button/berbel_hood/move_up/config",
+    "homeassistant/button/berbel_hood/move_down/config",
+    "homeassistant/sensor/berbel_hood/cover_state/config",
 #endif
     nullptr
   };
@@ -666,7 +762,7 @@ void publishDiscovery() {
     "\"ic\":\"mdi:fan\""
   );
 
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   // Position (select: Oben/Unten)
   publishDiscoveryMsg(
     "homeassistant/select/berbel_hood/position/config",
@@ -737,7 +833,19 @@ void publishDiscovery() {
     "\"ic\":\"mdi:timer-sand\""
   );
 
-#if HOOD_HAS_COVER
+#if HOOD_HAS_MULTI_BUTTON
+  // Multifunction key. What it does is configured in the Berbel app, so this is
+  // a plain button press with no state attached.
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/multi/config",
+    "\"name\":\"Multifunktion\","
+    "\"uniq_id\":\"berbel_multi\","
+    "\"cmd_t\":\"" MQTT_CMD_MULTI "\","
+    "\"ic\":\"mdi:gesture-tap-button\""
+  );
+#endif
+
+#if HOOD_HAS_LIFT
   // Move Up button (unconditional)
   publishDiscoveryMsg(
     "homeassistant/button/berbel_hood/move_up/config",
@@ -806,7 +914,7 @@ void restoreStateFromMqtt(const char* json) {
     size_t len = berbel::parseStatusRaw(val, hood.raw, sizeof(hood.raw));
     if (len > 0) hood.rawLen = len;
   }
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   if (berbel::jsonGetValue(json, "position", val, sizeof(val)))
     hood.position = (strcmp(val, "Unten") == 0) ? "Unten" : "Oben";
   if (berbel::jsonGetValue(json, "cover_state", val, sizeof(val))) {
@@ -819,7 +927,7 @@ void restoreStateFromMqtt(const char* json) {
 
   hoodStateValid = true;
   mqtt.unsubscribe(MQTT_STATE);
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   Log.printf("[MQTT] State restored: light_up=%d light_down=%d fan=%d nachlauf=%d pos=%s\n",
     hood.lightUp, hood.lightDown, hood.fanSpeed, hood.nachlauf, hood.position);
 #else
@@ -886,6 +994,14 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     queueButton(BTN_MULTI, "Light Ceiling");
   }
 #endif
+#if HOOD_HAS_MULTI_BUTTON
+  // The multifunction key does whatever was assigned to it in the Berbel app,
+  // which is often a scene rather than a toggle. Nothing to guard against a
+  // state with: just press it.
+  else if (t == MQTT_CMD_MULTI) {
+    queueButton(BTN_MULTI, "Multi");
+  }
+#endif
   // Power button (Ausschalten)
   else if (t == MQTT_CMD_POWER) {
     queueButton(BTN_POWER, "Power Off");
@@ -916,7 +1032,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     }
     queueButton(btnCode, btnName);
   }
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
   // Position (Oben/Unten)
   else if (t == MQTT_CMD_POSITION) {
     if (strcmp(msg, "Oben") == 0)        queueButton(BTN_MOVE_UP, "Move Up");
@@ -943,14 +1059,22 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     setRemoteLog(strcmp(msg, "ON") == 0);
     Log.printf("[LOG] Remote logging %s\n", remoteLogEnabled ? "enabled" : "disabled");
   }
-  // Debug: send raw button code (hex string like "0A")
+  // Send a raw button code, to find the ones this firmware does not know. Takes
+  // "0B" or "0B:2000", the second form holding the button for 2000 ms. Not
+  // limited to the codes in the table above: a hood model may well use others,
+  // and finding them is what this topic is for.
   else if (t == MQTT_CMD_DEBUG) {
-    uint8_t code = (uint8_t)strtol(msg, NULL, 16);
-    if (code >= 0x01 && code <= 0x0D) {
-      char name[16];
-      snprintf(name, sizeof(name), "Debug 0x%02X", code);
-      queueButton(code, name);
+    uint8_t code = 0;
+    uint16_t hold = BTN_HOLD_MS;
+    if (!berbel::parseDebugCommand(msg, BTN_HOLD_MAX_MS, &code, &hold)) {
+      Log.printf("[DBG] Ignored '%s': expected a code 01-FF, optionally :1-%d\n",
+                 msg, BTN_HOLD_MAX_MS);
+      return;
     }
+
+    char name[16];
+    snprintf(name, sizeof(name), "Debug 0x%02X", code);
+    queueButton(code, name, hold);
   }
 }
 
@@ -1021,10 +1145,13 @@ void mqttReconnect() {
 #if HOOD_HAS_CEILING_LIGHT
     mqtt.subscribe(MQTT_CMD_LIGHT_CEILING);
 #endif
+#if HOOD_HAS_MULTI_BUTTON
+    mqtt.subscribe(MQTT_CMD_MULTI);
+#endif
     mqtt.subscribe(MQTT_CMD_POWER);
     mqtt.subscribe(MQTT_CMD_NACHLAUF);
     mqtt.subscribe(MQTT_CMD_FAN_PRESET);
-#if HOOD_HAS_COVER
+#if HOOD_HAS_LIFT
     mqtt.subscribe(MQTT_CMD_POSITION);
     mqtt.subscribe(MQTT_CMD_MOVE_UP);
     mqtt.subscribe(MQTT_CMD_MOVE_DOWN);
@@ -1278,37 +1405,7 @@ void loop() {
   // --- Process command queue (spaced out button presses) ---
   processCmdQueue();
 
-  // --- Process status update from hood (set in BLE callback) ---
-  if (newStatusReceived) {
-    newStatusReceived = false;
-
-    // Skip the sync packet (all 0x11) entirely
-    if (berbel::isSyncPacket(pendingStatus)) {
-      Log.println("[HOOD] Sync packet ignored");
-    } else {
-      hoodStateValid = true;
-      hood.rawLen = pendingStatusLen;
-      memcpy(hood.raw, pendingStatus, hood.rawLen);
-
-      berbel::DecodedStatus status = berbel::decodeHoodStatus(hood.raw, hood.rawLen);
-      hood.lightUp   = status.lightUp;
-      hood.lightDown = status.lightDown;
-#if HOOD_HAS_CEILING_LIGHT
-      hood.lightCeiling = status.lightCeiling;
-#endif
-      hood.fanSpeed  = status.fanSpeed;
-      hood.nachlauf  = status.nachlauf;
-
-#if HOOD_HAS_COVER
-      berbel::CoverResult cover = berbel::nextCoverState(
-        hood.coverState, hood.position, status.movingUp, status.movingDown);
-      hood.coverState = cover.state;
-      hood.position = cover.position;
-#endif
-
-      publishState();
-    }
-  }
+  processHoodStatus();
 
   delay(10);
 }

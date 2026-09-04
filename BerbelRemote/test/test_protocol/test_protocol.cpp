@@ -342,6 +342,62 @@ void test_sync_packet_ignores_bytes_past_the_ninth(void) {
   TEST_ASSERT_FALSE(isSyncPacket(raw));
 }
 
+// parseDebugCommand
+// ----------------------------------------------------------------------------
+void test_debug_cmd_code_only_keeps_default_hold(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_TRUE(parseDebugCommand("0B", 5000, &code, &hold));
+  TEST_ASSERT_EQUAL_UINT8(0x0B, code);
+  TEST_ASSERT_EQUAL_UINT16(100, hold);
+}
+
+void test_debug_cmd_with_hold(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_TRUE(parseDebugCommand("0B:2000", 5000, &code, &hold));
+  TEST_ASSERT_EQUAL_UINT8(0x0B, code);
+  TEST_ASSERT_EQUAL_UINT16(2000, hold);
+}
+
+void test_debug_cmd_accepts_codes_beyond_the_known_table(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_TRUE(parseDebugCommand("ff", 5000, &code, &hold));
+  TEST_ASSERT_EQUAL_UINT8(0xFF, code);
+}
+
+void test_debug_cmd_rejects_code_out_of_range(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_FALSE(parseDebugCommand("00", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("100", 5000, &code, &hold));
+}
+
+void test_debug_cmd_rejects_hold_out_of_range(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_FALSE(parseDebugCommand("0B:0", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("0B:5001", 5000, &code, &hold));
+}
+
+// A ";" for ":" typo must not silently press the button with the default hold.
+void test_debug_cmd_rejects_trailing_garbage(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_FALSE(parseDebugCommand("0B;500", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("0B 500", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("0B:2000junk", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("0B:", 5000, &code, &hold));
+}
+
+void test_debug_cmd_rejects_non_hex(void) {
+  uint8_t code = 0; uint16_t hold = 100;
+  TEST_ASSERT_FALSE(parseDebugCommand("", 5000, &code, &hold));
+  TEST_ASSERT_FALSE(parseDebugCommand("ZZ", 5000, &code, &hold));
+}
+
+void test_debug_cmd_leaves_outputs_untouched_on_failure(void) {
+  uint8_t code = 0xAA; uint16_t hold = 123;
+  TEST_ASSERT_FALSE(parseDebugCommand("0B;500", 5000, &code, &hold));
+  TEST_ASSERT_EQUAL_UINT8(0xAA, code);
+  TEST_ASSERT_EQUAL_UINT16(123, hold);
+}
+
 // ----------------------------------------------------------------------------
 // parseStatusRaw
 // ----------------------------------------------------------------------------
@@ -457,6 +513,15 @@ int main(int, char**) {
   RUN_TEST(test_long_frame_fan_steps);
   RUN_TEST(test_unknown_frame_length_uses_short_layout);
   RUN_TEST(test_sync_packet_ignores_bytes_past_the_ninth);
+
+  RUN_TEST(test_debug_cmd_code_only_keeps_default_hold);
+  RUN_TEST(test_debug_cmd_with_hold);
+  RUN_TEST(test_debug_cmd_accepts_codes_beyond_the_known_table);
+  RUN_TEST(test_debug_cmd_rejects_code_out_of_range);
+  RUN_TEST(test_debug_cmd_rejects_hold_out_of_range);
+  RUN_TEST(test_debug_cmd_rejects_trailing_garbage);
+  RUN_TEST(test_debug_cmd_rejects_non_hex);
+  RUN_TEST(test_debug_cmd_leaves_outputs_untouched_on_failure);
 
   RUN_TEST(test_parse_status_raw_round_trip);
   RUN_TEST(test_parse_status_raw_round_trip_long_frame);
