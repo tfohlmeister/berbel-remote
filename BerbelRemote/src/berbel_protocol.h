@@ -1,5 +1,5 @@
 /**
- * Berbel BFB 6bT - pure protocol logic (no Arduino/NimBLE dependencies).
+ * Berbel hood - pure protocol logic (no Arduino/NimBLE dependencies).
  *
  * Everything here is a side-effect-free function of its inputs so it can be
  * unit-tested on the host with PlatformIO's `native` environment. The decode
@@ -15,7 +15,7 @@
 
 namespace berbel {
 
-// Decoded view of a 9-byte hood status notification.
+// Decoded view of a hood status notification.
 struct DecodedStatus {
   bool lightUp = false;       // Oberlicht
   bool lightDown = false;     // Unterlicht
@@ -26,36 +26,112 @@ struct DecodedStatus {
   bool movingDown = false;    // cover deploying
 };
 
+// Longest status frame known. The BFB 6bT sends 9 bytes, the Skyline Edge Play
+// 13. Frames are truncated to this length, anything beyond stays undecoded.
+static const size_t STATUS_MAX_LEN = 13;
+
+// One flag in the status frame: which byte carries it, and which bits to test.
+struct StatusBit {
+  uint8_t index;
+  uint8_t mask;
+};
+
+// Where each flag sits in the frame. Hood models disagree on this and the frame
+// length is the only thing that tells them apart, so every field is looked up in
+// a layout rather than read from a fixed offset. A model that moves another flag
+// is one more table below, not another branch in the decoder.
+struct StatusLayout {
+  StatusBit fanStep1;
+  StatusBit fanStep2;
+  StatusBit fanStep3;
+  StatusBit fanPower;
+  StatusBit lightUp;
+  StatusBit lightDown;
+  StatusBit lightCeiling;
+  StatusBit nachlauf;
+  StatusBit movingUp;
+  StatusBit movingDown;
+};
+
+// 9-byte frame (BFB 6bT). Every field measured.
+static const StatusLayout LAYOUT_SHORT = {
+  /* fanStep1     */ {0, 0x10},
+  /* fanStep2     */ {1, 0x01},
+  /* fanStep3     */ {1, 0x10},
+  /* fanPower     */ {2, 0x09},
+  /* lightUp      */ {2, 0x10},
+  /* lightDown    */ {4, 0x10},
+  /* lightCeiling */ {5, 0x01},
+  /* nachlauf     */ {5, 0x90},
+  /* movingUp     */ {4, 0x01},
+  /* movingDown   */ {6, 0x01},
+};
+
+// 13-byte frame (Skyline Edge Play). The three fan steps and Unterlicht sit where
+// the short frame puts them, and the Deckenlicht has moved from byte 5 to byte 9;
+// those five are measured (issue #3). The remaining fields are carried over from
+// the short layout and are NOT confirmed on this frame.
+static const StatusLayout LAYOUT_LONG = {
+  /* fanStep1     */ {0, 0x10},
+  /* fanStep2     */ {1, 0x01},
+  /* fanStep3     */ {1, 0x10},
+  /* fanPower     */ {2, 0x09},
+  /* lightUp      */ {2, 0x10},
+  /* lightDown    */ {4, 0x10},
+  /* lightCeiling */ {9, 0x01},
+  /* nachlauf     */ {5, 0x90},
+  /* movingUp     */ {4, 0x01},
+  /* movingDown   */ {6, 0x01},
+};
+
+// Pick the layout for a frame of `len` bytes. Only a length we have measured gets
+// its own layout; everything else falls back to the short one, whose indices stay
+// within the nine bytes every hood agrees on.
+inline StatusLayout statusLayout(size_t len) {
+  return len == STATUS_MAX_LEN ? LAYOUT_LONG : LAYOUT_SHORT;
+}
+
+inline bool statusBitSet(const uint8_t* raw, StatusBit bit) {
+  return (raw[bit.index] & bit.mask) != 0;
+}
+
 // Hood sends an all-0x11 sync packet on connect that carries no real state.
+// Only the first nine bytes are checked: that is the whole packet on a 9-byte
+// hood, and what a longer frame carries after them has never been measured.
+// Requiring 0x11 there too would risk taking a sync packet for real state and
+// publishing it retained over the last known good one.
 inline bool isSyncPacket(const uint8_t raw[9]) {
-  for (int i = 0; i < 9; i++) {
+  for (size_t i = 0; i < 9; i++) {
     if (raw[i] != 0x11) return false;
   }
   return true;
 }
 
-// Decode the 9-byte bitmask status into discrete fields.
-inline DecodedStatus decodeHoodStatus(const uint8_t raw[9]) {
+// Decode the bitmask status into discrete fields, using the layout that matches
+// the frame length.
+inline DecodedStatus decodeHoodStatus(const uint8_t* raw, size_t len) {
+  const StatusLayout l = statusLayout(len);
   DecodedStatus s;
 
-  // Lights (bits don't overlap with fan)
-  s.lightUp = (raw[2] & 0x10) != 0;       // Oberlicht: byte 2, bit 4
-  s.lightDown = (raw[4] & 0x10) != 0;     // Unterlicht: byte 4, bit 4
-  // Deckenlicht: byte 5, bit 0. Shares the byte with Nachlauf (0x90) but no bits
-  // overlap. Confirmed on a single hood (issue #3), unverified elsewhere.
-  s.lightCeiling = (raw[5] & 0x01) != 0;
+  s.lightUp = statusBitSet(raw, l.lightUp);
+  s.lightDown = statusBitSet(raw, l.lightDown);
+  s.lightCeiling = statusBitSet(raw, l.lightCeiling);
 
   // Fan speed (only one active at a time)
-  if (raw[2] & 0x09)      s.fanSpeed = 4;  // Power:   0000 1001
-  else if (raw[1] & 0x10) s.fanSpeed = 3;  // Stufe 3: 0001 0000
-  else if (raw[1] & 0x01) s.fanSpeed = 2;  // Stufe 2: 0000 0001
-  else if (raw[0] & 0x10) s.fanSpeed = 1;  // Stufe 1: 0001 0000
-  else                    s.fanSpeed = 0;  // Aus
+  if (statusBitSet(raw, l.fanPower))       s.fanSpeed = 4;
+  else if (statusBitSet(raw, l.fanStep3))  s.fanSpeed = 3;
+  else if (statusBitSet(raw, l.fanStep2))  s.fanSpeed = 2;
+  else if (statusBitSet(raw, l.fanStep1))  s.fanSpeed = 1;
+  else                                     s.fanSpeed = 0;
 
-  s.nachlauf = (raw[5] & 0x90) != 0;       // parallel to fan speed
-  s.movingUp = (raw[4] & 0x01) != 0;
-  s.movingDown = (raw[6] & 0x01) != 0;
+  s.nachlauf = statusBitSet(raw, l.nachlauf);  // parallel to fan speed
+  s.movingUp = statusBitSet(raw, l.movingUp);
+  s.movingDown = statusBitSet(raw, l.movingDown);
   return s;
+}
+
+inline DecodedStatus decodeHoodStatus(const uint8_t raw[9]) {
+  return decodeHoodStatus(raw, 9);
 }
 
 // Cover state machine result. Strings match the HA entity values.
@@ -141,11 +217,21 @@ inline bool jsonGetValue(const char* json, const char* key, char* out, size_t ou
   return true;
 }
 
-// Parse the space-separated 9-byte hex string used for `status_raw`
-// (e.g. "00 00 00 00 10 00 00 00 00") back into raw bytes. `out` is only
-// written on success. Returns false unless the string holds exactly 9
-// two-digit hex bytes separated by single spaces.
-inline bool parseStatusRaw(const char* s, uint8_t out[9]) {
+// Render `len` bytes as the space-separated hex string used for `status_raw`
+// (e.g. "00 00 00 00 10 00 00 00 00"). Needs `len * 3` bytes of room in `out`.
+inline void formatStatusRaw(const uint8_t* raw, size_t len, char* out, size_t outLen) {
+  if (outLen == 0) return;
+  size_t pos = 0;
+  for (size_t i = 0; i < len && pos + 3 < outLen; i++) {
+    pos += snprintf(out + pos, outLen - pos, i == 0 ? "%02X" : " %02X", raw[i]);
+  }
+  out[pos] = '\0';
+}
+
+// Parse the space-separated hex string used for `status_raw` back into bytes.
+// Returns the number of bytes parsed, 0 if the string is malformed, holds fewer
+// than 9 bytes or more than fit. `out` is only written on success.
+inline size_t parseStatusRaw(const char* s, uint8_t* out, size_t outLen) {
   auto hexVal = [](char c) -> int {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'A' && c <= 'F') return c - 'A' + 10;
@@ -153,21 +239,23 @@ inline bool parseStatusRaw(const char* s, uint8_t out[9]) {
     return -1;
   };
 
-  uint8_t parsed[9];
+  uint8_t parsed[STATUS_MAX_LEN];
+  size_t count = 0;
   const char* p = s;
-  for (int i = 0; i < 9; i++) {
-    if (i > 0 && *p++ != ' ') return false;
+  while (*p != '\0') {
+    if (count > 0 && *p++ != ' ') return 0;
+    if (count >= STATUS_MAX_LEN || count >= outLen) return 0;
     int hi = hexVal(p[0]);
-    if (hi < 0) return false;
+    if (hi < 0) return 0;
     int lo = hexVal(p[1]);
-    if (lo < 0) return false;
-    parsed[i] = (uint8_t)((hi << 4) | lo);
+    if (lo < 0) return 0;
+    parsed[count++] = (uint8_t)((hi << 4) | lo);
     p += 2;
   }
-  if (*p != '\0') return false;
+  if (count < 9) return 0;
 
-  memcpy(out, parsed, 9);
-  return true;
+  memcpy(out, parsed, count);
+  return count;
 }
 
 }  // namespace berbel
