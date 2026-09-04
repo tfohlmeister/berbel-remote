@@ -154,9 +154,39 @@ the unverified rows follow the manual's order either.
 | 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter | no, by elimination |
 | 0x09 | Raise | Liftfunktion "Heben" | yes |
 | 0x0A | Cooktop Light (Unterlicht) | Kochfeld-Beleuchtung | yes |
-| 0x0B | Ceiling Light | Multifunktionstaste (e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
+| 0x0B | Multifunction | Multifunktionstaste (assigned in the Berbel app, e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
 | 0x0C | Afterrun | Nachlauffunktion | yes |
 | 0x0D | Lower | Liftfunktion "Senken" | yes |
+| 0x12 | Ceiling Light | Deckenlicht; not a BFB 6bT button | yes, on a Skyline Edge Play |
+
+## The berbel App as a Second Source
+
+The Skyline Edge hoods expose a GATT server of their own, which the berbel
+iPhone app talks to. Captured with PacketLogger by @jens-42 on a Skyline Edge
+Play ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)):
+
+| App action | Characteristic | Value |
+|---|---|---|
+| Lüfter Stufe 1 | `f006f004` | `0002` |
+| Lüfter Stufe 2 | `f006f004` | `0003` |
+| Lüfter Stufe 3 | `f006f004` | `0004` |
+| Lüfter Stufe P | `f006f004` | `0005` |
+| Kochfeld-Beleuchtung toggle | `f006f004` | `000a` |
+| Nachlauffunktion | `f006f004` | `000c` |
+| Deckenlicht toggle | `f006f004` | `0012` |
+| Effektbeleuchtung on | `f006f006` | `00a30000ff00000005ffffff00ff0000` + 15 zero bytes |
+| Effektbeleuchtung off | `f006f006` | `00a30000ff00000005ffffff0000…` |
+
+**Those are our button codes.** `0002` through `0005`, `000a` and `000c` carry
+the same code numbers this firmware sends to `f004f002` as a remote. The framing
+differs: the app writes the code in the second byte (`00 02`), the remote sends
+it in the first (`02 00`, followed by `00 00` as the release). Same vocabulary,
+two channels, so the app is a legitimate source for codes the remote's manual
+does not name. `0012` for the Deckenlicht was found precisely this way and then
+confirmed on the hood.
+
+`f006f006` is a different matter: colour is written as a 31-byte payload with
+RGB in it, not as a button code, and this firmware does not speak that.
 
 ## Hood Status Protocol
 

@@ -35,11 +35,23 @@
 // simply presses it.
 #define HOOD_HAS_MULTI_BUTTON false
 
-// Set to true if your hood has a ceiling connection with effect lighting
+// Set to true if your hood has a third lamp on a ceiling connection
 // ("Deckenanschluss mit Effektbeleuchtung", called Uplight in newer berbel
-// manuals) AND the multifunction button is assigned to toggle it. Only then is
-// a light entity the right fit: it tracks the lamp's state and sends the button
-// when that state should change. If the app assigns anything else to the button
-// (turning the lamp on without turning it off again, or a scene), use
-// HOOD_HAS_MULTI_BUTTON instead, or the entity gets stuck on.
+// manuals), to get a Deckenlicht light entity for it.
+//
+// A light entity only fits a button that toggles the lamp, since it tracks the
+// state and presses the button when that state should change. Which button that
+// is depends on the hood, see BTN_LIGHT_CEILING below. On a hood where the lamp
+// hangs off the multifunction key, that key must be assigned a toggle in the
+// Berbel app; with any other assignment (switching the lamp on without ever
+// switching it off, or a scene) the entity gets stuck and you want
+// HOOD_HAS_MULTI_BUTTON instead.
 #define HOOD_HAS_CEILING_LIGHT false
+
+// Which button code the Deckenlicht entity presses. The default is the
+// multifunction key (0x0B), which is how a BFB 6bT hood drives that lamp.
+// A Skyline Edge Play has a dedicated code for it instead, verified on real
+// hardware in issue #3, and presumably the Skyline Edge Base does too:
+//   #define BTN_LIGHT_CEILING 0x12
+// If your hood does neither, berbel/hood/debug/send can find the code, see
+// the README.

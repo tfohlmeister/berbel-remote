@@ -122,6 +122,13 @@
 #define BTN_TIMER       0x0C
 #define BTN_MOVE_DOWN   0x0D
 
+// Which code the Deckenlicht entity presses. A BFB 6bT hood drives that lamp
+// from the multifunction key; a Skyline Edge Play has a dedicated code for it
+// (0x12) and does not use 0x0B. Override in config.h.
+#ifndef BTN_LIGHT_CEILING
+#define BTN_LIGHT_CEILING BTN_MULTI
+#endif
+
 // How long a button is held down. The original remote is not this precise, but
 // every function reacts to a short press. The debug topic can override it, for
 // hoods whose multifunction button may want a longer one.
@@ -991,7 +998,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       Log.printf("[MQTT] Deckenlicht already %s, skipping\n", msg);
       return;
     }
-    queueButton(BTN_MULTI, "Light Ceiling");
+    queueButton(BTN_LIGHT_CEILING, "Light Ceiling");
   }
 #endif
 #if HOOD_HAS_MULTI_BUTTON

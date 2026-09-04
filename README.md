@@ -29,28 +29,39 @@ berbel has since discontinued the 6bT and replaced it with the **BFB 8bT**
 same range of hoods. Untested here, but nothing suggests it needs a different
 emulation.
 
-### Where this firmware falls short
+### Skyline Edge Base and Play
 
 The **Skyline Edge Base (BIH SKEB)** and **Skyline Edge Play (BIH SKEP)** ship
-with the **BFB 7bT** (Art. 1090084) instead, and berbel lists that remote as
-compatible with those two hoods only. Those hoods do pair with this firmware and
-do respond to the basic functions, but not to everything:
+with the **BFB 7bT** (Art. 1090084) instead, which berbel lists as compatible
+with those two hoods only. They work with this firmware. In `config.h`, set the
+existing `HOOD_HAS_CEILING_LIGHT` line to `true` and add one define:
 
-* The 7bT has **19 buttons against the 6bT's 13**, among them Uplight, Motion
-  Lights, colour temperature for each light and a favourite scene. This firmware
-  has no button code for any of them, because the remote it emulates has no such
-  key.
-* Conversely the 6bT's **Multifunktionstaste** and **Synchronisation** do not
-  exist on the 7bT. The key in that position is listed in the berbel manual as
-  "ohne Funktion", which is why sending `0x0B` to a Skyline Edge does nothing
-  ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
-* Their status frame is longer and lays some flags out differently, see
-  [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
+```c
+#define BTN_LIGHT_CEILING 0x12
+```
 
-These hoods also expose a GATT server of their own, which is a different
-protocol from the one here and is handled by other projects. If you want to map
-the missing functions for a Skyline Edge, `berbel/hood/debug/send` is the tool
-for it and the findings are welcome in an issue.
+Those hoods accept the 6bT's button codes for everything both remotes share.
+Their ceiling light is the exception: it sits on its own code `0x12` rather than
+on the multifunction key, which is what the define above is for.
+
+They also send a 13-byte status frame instead of 9, which this firmware decodes,
+**but only partly verified**: the fan steps, Unterlicht and Deckenlicht were
+measured on a Skyline Edge Play, while Oberlicht, Fan Power, Nachlauf and the two
+lift flags are assumed to sit where the 9-byte frame puts them. If one of those
+entities reads wrong on your hood, that assumption is why, and
+[REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) marks which is which.
+
+All of it comes from [issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3),
+measured on a Skyline Edge Play. The Base was never tested.
+
+What this firmware cannot reach on them: the 7bT has **19 buttons against the
+6bT's 13**, and the extra ones are colour temperature per light, Motion-Lights
+and a favourite scene. No codes are known for those. The colour settings do not
+even travel as button codes; the berbel app writes them as 31-byte payloads on a
+separate characteristic that this firmware does not speak.
+
+If you map any of them, `berbel/hood/debug/send` is the tool and the findings are
+welcome in an issue.
 
 ## Hardware Requirements
 
@@ -172,10 +183,11 @@ performs a function at all depends on its equipment.
 | 0x0B | Multifunction | Multifunktionstaste (assigned in the Berbel app, e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
 | 0x0C | Afterrun | Nachlauffunktion | yes |
 | 0x0D | Lower | Liftfunktion "Senken" | yes |
+| 0x12 | Ceiling Light | Deckenlicht, Skyline Edge only | yes, on a Skyline Edge Play |
 
-The table covers the BFB 6bT. Other remotes may use codes beyond `0x0D`, or put a
-function somewhere else entirely: on a BFB 7bT hood, `0x0B` does nothing at all
-while the original remote still switches its ceiling light
+`0x01` to `0x0D` are the BFB 6bT's own buttons. `0x12` is not: it was found on a
+Skyline Edge Play, whose BFB 7bT has 19 buttons where the 6bT has 13, so more
+codes exist above `0x0D` than anyone has recorded
 ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
 
 Protocol: 2-byte notifications on characteristic `f004f002-...-berbel`. Press: `[code, 0x00]`, Release: `[0x00, 0x00]`.
