@@ -185,26 +185,26 @@ two channels, so the app is a legitimate source for codes the remote's manual
 does not name. `0012` for the Deckenlicht was found precisely this way and then
 confirmed on the hood.
 
-### Do not drive a hood through `f006f006`
+### `f006f006`, the colour channel: handle with care
 
-`f006f006` is a different matter. Colour and brightness are written there as
-31-byte payloads rather than button codes, and this firmware does not speak it.
+Colour and brightness are written to `f006f006` as 31-byte payloads rather than
+button codes. This firmware does not speak it.
 
-**It is also reported to crash the hood.** @jens-42 found that controlling a
+There is a report of it destabilising a hood. @jens-42 wrote that controlling a
 Skyline Edge Play over `f006f006` "frequently leads to crashes, requiring me to
 flip the circuit breaker to restart the unit", with gesture control (the laser
-dot) dead until then. The two-byte writes to `f006f004` are, in his words,
-"absolutely reliable". One reporter, one hood, and nothing here reproduces it,
-but the failure mode is bad enough to take at face value.
+dot) dead until then, while the two-byte writes to `f006f004` were "absolutely
+reliable" for him. That is one report from one hood, not reproduced here, and it
+may well depend on the model or on how the writes are paced. Worth knowing
+rather than worth panicking about.
 
-This firmware never writes to `f006f006`, so nobody using it is exposed. It
-matters if you are tempted to add colour support: that is the channel you would
-need, and this is the risk that comes with it.
+None of it affects using this firmware, which never writes to `f006f006`. It is
+something to keep in mind if you extend it towards colour, since that is the
+channel you would need.
 
-[berbel-ha](https://github.com/dirkbloessl/berbel-ha) sends all of its light
-**and fan** commands over `f006f006` (`WRITE_COMMANDS` in its `const.py`). Its
-status parsing is independently useful and agrees with ours; its command path is
-the one the report above is about.
+[berbel-ha](https://github.com/dirkbloessl/berbel-ha) sends its light and fan
+commands over `f006f006` (`WRITE_COMMANDS` in its `const.py`) and evidently works
+for its users. Its status parsing is independently useful and agrees with ours.
 
 ## Hood Status Protocol
 

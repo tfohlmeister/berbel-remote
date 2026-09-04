@@ -54,10 +54,11 @@ All of the above was measured on a Skyline Edge **Play**. The Base was never
 tested here, though the independent [berbel-ha](https://github.com/dirkbloessl/berbel-ha)
 integration decodes the same status offsets on one.
 
-> **Do not control these hoods through characteristic `f006f006`.** It is the
-> colour and brightness channel, and driving a Skyline Edge Play over it has been
-> reported to crash the hood until the circuit breaker is flipped. This firmware
-> never writes there. It is worth knowing before you extend it.
+> A note if you extend this firmware towards colour: characteristic `f006f006`
+> is the colour and brightness channel, and there is a report of driving a
+> Skyline Edge Play over it destabilising the hood. Not reproduced here, and this
+> firmware never writes there, but worth handling with care. Details in
+> [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
 
 What this firmware cannot reach on them: the 7bT has **19 buttons against the
 6bT's 13**, and the extra ones are colour temperature per light, Motion-Lights
