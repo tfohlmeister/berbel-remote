@@ -58,7 +58,11 @@ static const StatusLayout LAYOUT_SHORT = {
   /* fanStep1     */ {0, 0x10},
   /* fanStep2     */ {1, 0x01},
   /* fanStep3     */ {1, 0x10},
-  /* fanPower     */ {2, 0x09},
+  // 0x01, not the 0x09 this used to be. A BFB 7bT lights its P key on 0x01 and
+  // on nothing for 0x08, so only the low bit is Fan Power. A Skyline Frame on
+  // Power sends 0x09, both bits, which this still matches; 0x08 on its own has
+  // never come from a hood and no longer counts as Power.
+  /* fanPower     */ {2, 0x01},
   /* lightUp      */ {2, 0x10},
   /* lightDown    */ {4, 0x10},
   /* lightCeiling */ {5, 0x01},
@@ -67,16 +71,20 @@ static const StatusLayout LAYOUT_SHORT = {
   /* movingDown   */ {6, 0x01},
 };
 
-// 13-byte frame (Skyline Edge Play). Everything except Fan Power is confirmed on
-// such a hood: the fan steps, both lights, the lift flags and the Deckenlicht on
-// byte 9 come from issue #3, and berbel-ha, an independent integration for the
-// same hoods, decodes the lights, fan steps and Nachlauf at the same offsets.
-// Fan Power is carried over from the short layout and remains unverified.
+// 13-byte frame (Skyline Edge Play). The fan steps, both lights, the lift flags
+// and the Deckenlicht on byte 9 come from issue #3, and berbel-ha, an
+// independent integration for the same hoods, decodes the lights, fan steps and
+// Nachlauf at the same offsets. Fan Power used to be carried over from the short
+// layout unverified; it has since been measured, see the note on it below.
 static const StatusLayout LAYOUT_LONG = {
   /* fanStep1     */ {0, 0x10},
   /* fanStep2     */ {1, 0x01},
   /* fanStep3     */ {1, 0x10},
-  /* fanPower     */ {2, 0x09},
+  // 0x01, not the 0x09 the short layout uses. Measured against a BFB 7bT's own
+  // key lighting: 0x01 alone lights the P key, 0x08 alone lights nothing, and
+  // both together make it blink. So 0x08 is a separate flag of unknown meaning
+  // and must not be read as Fan Power on its own.
+  /* fanPower     */ {2, 0x01},
   /* lightUp      */ {2, 0x10},
   /* lightDown    */ {4, 0x10},
   /* lightCeiling */ {9, 0x01},

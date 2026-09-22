@@ -1,8 +1,19 @@
-# Berbel BFB 6bT - BLE Remote Control Emulator
+# Berbel Remote Emulator - BFB 6bT, 8bT and 7bT over BLE
 
 [![tests](https://github.com/tfohlmeister/berbel-remote/actions/workflows/test.yml/badge.svg)](https://github.com/tfohlmeister/berbel-remote/actions/workflows/test.yml)
 
-ESP32-based emulator for the **Berbel BFB 6bT** remote control (Art. 1090045), with full Home Assistant integration via MQTT. Tested with a Berbel Skyline Frame hood, but the BFB 6bT remote is compatible with other Berbel hoods as well.
+ESP32-based emulator for the Berbel BLE remote controls, with full Home Assistant
+integration via MQTT. One build flag picks which remote to be:
+
+| Profile | Remote | Keys | Reaches |
+|---|---|---|---|
+| `REMOTE_BFB_6BT` | **BFB 6bT** (Art. 1090045) | 13 | hoods with berbel Connect 2.0, from Nov 2020 |
+| `REMOTE_BFB_8BT` | **BFB 8bT** (Art. 1090093) | 13 | the same hoods; the 6bT's replacement |
+| `REMOTE_BFB_7BT` | **BFB 7bT** (Art. 1090084) | 19 | Skyline Edge Base and Play |
+
+All three remotes were read out key by key over BLE, so the codes here are
+measured rather than inferred. Developed and tested against a Berbel Skyline
+Frame.
 
 > **Disclaimer:** This is an **unofficial**, independent project created through reverse engineering.
 > It is **not affiliated with, endorsed by, or connected to berbel Ablufttechnik GmbH**.
@@ -11,48 +22,76 @@ ESP32-based emulator for the **Berbel BFB 6bT** remote control (Art. 1090045), w
 
 ## Features
 
-- **BLE Remote Emulation** - Fully emulates the original Berbel BFB 6bT remote control
+- **BLE Remote Emulation** - emulates the BFB 6bT, 8bT or 7bT, selected at build time
 - **Home Assistant Integration** - MQTT auto-discovery creates entities automatically
-- **Real-time Status Decoding** - Reads 9-byte status packets from the hood (lights, fan, position, afterrun)
-- **OTA Updates** - Wireless firmware updates via ArduinoOTA
+- **Real-time Status Decoding** - reads the hood's status packets in both known frame layouts (lights, fan, position, afterrun)
+- **OTA Updates** - wireless firmware updates via ArduinoOTA
 - **NimBLE Stack** - ~100KB heap savings over Arduino BLE (Bluedroid), leaves room for WiFi + MQTT
 
-## Compatible Hoods
+## Which remote to emulate
 
-This firmware emulates the **BFB 6bT** remote (Art. 1090045), so it reaches the
-hoods that remote reaches: those with **berbel Connect 2.0** and the berbel
-ConInterface (Art. 1090043), built from **November 2020** onwards (built-in
-models from April 2021). Developed and tested against a Berbel Skyline Frame.
+Set `REMOTE_PROFILE` in `config.h` to the remote that came with your hood. It
+defaults to `REMOTE_BFB_6BT`, so an existing `config.h` keeps working unchanged.
 
-berbel has since discontinued the 6bT and replaced it with the **BFB 8bT**
-(Art. 1090093), which carries the same 13 buttons and the same functions for the
-same range of hoods. Untested here, but nothing suggests it needs a different
-emulation.
+### BFB 6bT and BFB 8bT
 
-### Skyline Edge Base and Play
+The **BFB 6bT** (Art. 1090045) reaches hoods with **berbel Connect 2.0** and the
+berbel ConInterface (Art. 1090043), built from **November 2020** onwards
+(built-in models from April 2021).
+
+berbel has since discontinued it and replaced it with the **BFB 8bT**
+(Art. 1090093): same 13 keys, same functions, same hoods. Both were read out key
+by key and send an identical set of codes, `0x01` to `0x0D`, with nothing left
+over on either. The two profiles therefore behave the same, and which one you
+pick only changes the name in the log.
+
+### BFB 7bT, for the Skyline Edge Base and Play
 
 The **Skyline Edge Base (BIH SKEB)** and **Skyline Edge Play (BIH SKEP)** ship
-with the **BFB 7bT** (Art. 1090084) instead, which berbel lists as compatible
-with those two hoods only. They work with this firmware. In `config.h`, set the
-existing `HOOD_HAS_CEILING_LIGHT` line to `true` and add one define:
+with the **BFB 7bT** (Art. 1090084), which berbel lists as compatible with those
+two hoods only. It has **19 keys against the other two's 13**: twelve they share,
+no Synchronisation key, and seven of its own.
 
-```c
-#define BTN_LIGHT_CEILING 0x12
-```
+`REMOTE_BFB_7BT` switches those on. It points the Deckenlicht entity at the
+Uplight code `0x12` instead of the multifunction key, and adds five buttons:
 
-Those hoods accept the 6bT's button codes for everything both remotes share.
-Their ceiling light is the exception: it sits on its own code `0x12` rather than
-on the multifunction key, which is what the define above is for.
+| Entity | Code | Function |
+|---|---|---|
+| Farbtemperatur Oberlicht | `0x15` | colour temperature of the Effektbeleuchtung |
+| Farbtemperatur Unterlicht | `0x14` | colour temperature of the Kochfeld-Beleuchtung |
+| Farbtemperatur Deckenlicht | `0x13` | colour temperature of the Uplight *(Play only)* |
+| Motion-Lights | `0x16` | switch them on or off *(Play only)* |
+| Motion-Lights weiterschalten | `0x17` | step to the next one *(Play only)* |
 
-They also send a 13-byte status frame instead of 9, which this firmware decodes.
-Every field in it has been confirmed on such a hood except **Fan Power**, which
-is carried over from the 9-byte layout and may sit elsewhere. See
-[REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) for the table and where each
-confirmation comes from.
+They are **buttons, not lights or selects**, and deliberately so. A colour
+temperature key starts a sweep that a second press stops wherever it happens to
+be, and the hood's status frame carries no field for the result, so there is no
+state to track and an entity claiming one would be inventing it.
 
-All of the above was measured on a Skyline Edge **Play**. The Base was never
-tested here, though the independent [berbel-ha](https://github.com/dirkbloessl/berbel-ha)
-integration decodes the same status offsets on one.
+The 19th key is `0x0E`, which the manual itself lists as *ohne Funktion*. It
+sends a code anyway, and gets no entity here because nothing is known to happen
+when it is pressed. `berbel/hood/debug/send` reaches it on any build.
+
+> **Untested against a hood.** The seven 7bT codes were read off a real remote
+> and matched to its manual, which says what the *remote* sends. None of them has
+> been driven at a Skyline Edge, because there is none here. If you have one, an
+> issue saying what actually happens would be worth a lot.
+
+Before this profile existed, Skyline Edge owners reached the ceiling light by
+setting `HOOD_HAS_CEILING_LIGHT` to `true` and adding `#define BTN_LIGHT_CEILING
+0x12` by hand. That still works and still wins over the profile default, so
+nothing needs changing on an existing install.
+
+Skyline Edge hoods also send a **13-byte status frame** instead of 9, which this
+firmware decodes. Every field in it has now been measured, Fan Power last, which
+turned out to sit on `byte[2] & 0x01` rather than the `0x09` this project long
+assumed. See [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) for the table and
+where each confirmation comes from.
+
+All of the hood-side findings were measured on a Skyline Edge **Play**. The Base
+was never tested here, though the independent
+[berbel-ha](https://github.com/dirkbloessl/berbel-ha) integration decodes the
+same status offsets on one.
 
 > A note if you extend this firmware towards colour: characteristic `f006f006`
 > is the colour and brightness channel, and there is a report of driving a
@@ -60,14 +99,19 @@ integration decodes the same status offsets on one.
 > firmware never writes there, but worth handling with care. Details in
 > [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
 
-What this firmware cannot reach on them: the 7bT has **19 buttons against the
-6bT's 13**, and the extra ones are colour temperature per light, Motion-Lights
-and a favourite scene. No codes are known for those. The colour settings do not
-even travel as button codes; the berbel app writes them as 31-byte payloads on a
-separate characteristic that this firmware does not speak.
+### What a profile does not change
 
-If you map any of them, `berbel/hood/debug/send` is the tool and the findings are
-welcome in an issue.
+The identity this firmware presents to the hood stays the same for all three:
+the spoofed Texas Instruments MAC, the Device Information strings and the GATT
+device name. The real remotes differ in all three, and the profiles deliberately
+do not follow them.
+
+The reason is evidence. Skyline Edge owners already run this firmware with the
+current identity and reach their hoods, so it is known to work where a 7bT would
+be the original. The identities of the 8bT and 7bT were read off remotes that
+were never paired to a hood here. Adopting them would trade a proven value for
+an unproven one, and the way that failure would surface is a user whose hood
+stops pairing.
 
 ## Hardware Requirements
 
@@ -89,6 +133,7 @@ welcome in an issue.
 
    | Flag | Default | Set it when |
    |------|---------|-------------|
+   | `REMOTE_PROFILE` | `REMOTE_BFB_6BT` | Pick the remote that came with your hood: `REMOTE_BFB_6BT`, `REMOTE_BFB_8BT` or `REMOTE_BFB_7BT`. See [Which remote to emulate](#which-remote-to-emulate). |
    | `HOOD_HAS_LIFT` | `true` | Your hood has no lift ("Liftfunktion Heben/Senken"): set `false` to drop the Position, Hochfahren, Herunterfahren and Cover State entities. Renamed from `HOOD_HAS_COVER`, which still works but warns at compile time. |
    | `HOOD_HAS_MULTI_BUTTON` | `false` | You assigned something to the multifunction button in the Berbel app: set `true` to add a Multifunktion button that presses it. |
    | `HOOD_HAS_CEILING_LIGHT` | `false` | Your hood has a ceiling connection with effect lighting (a third lamp) **and** the multifunction button is assigned to toggle it: set `true` to add the Deckenlicht entity. Any other assignment needs `HOOD_HAS_MULTI_BUTTON` instead, see [The multifunction button](#the-multifunction-button). |
@@ -144,7 +189,12 @@ All entities are created automatically via MQTT auto-discovery.
 | BLE Verbindung | Binary Sensor | BLE connection status (diagnostic) |
 | Cover State | Sensor | Cover position: up/moving up/moving down/down (diagnostic) *(`HOOD_HAS_LIFT` only)* |
 | Multifunktion | Button | Presses the multifunction key (only with `HOOD_HAS_MULTI_BUTTON`) |
-| Status Raw | Sensor | Raw 9-byte hex for debugging (diagnostic) |
+| Farbtemperatur Oberlicht | Button | Start or stop the colour sweep of the Effektbeleuchtung *(`REMOTE_BFB_7BT` only)* |
+| Farbtemperatur Unterlicht | Button | Same for the Kochfeld-Beleuchtung *(`REMOTE_BFB_7BT` only)* |
+| Farbtemperatur Deckenlicht | Button | Same for the Uplight *(`REMOTE_BFB_7BT` only)* |
+| Motion-Lights | Button | Switch the Motion-Lights on or off *(`REMOTE_BFB_7BT` only)* |
+| Motion-Lights weiterschalten | Button | Step to the next Motion-Light *(`REMOTE_BFB_7BT` only)* |
+| Status Raw | Sensor | Raw status frame as hex, 9 or 13 bytes (diagnostic) |
 | Remote Log | Switch | Mirror the firmware log to MQTT (diagnostic) |
 | Log | Sensor | Most recent firmware log line (diagnostic, disabled by default) |
 
@@ -170,31 +220,37 @@ it.
 ## Button Codes
 
 Complete mapping of all 13 buttons on the BFB 6bT remote control. The codes themselves are reverse engineered,
-the function names come from the Berbel manual (document 6005229_0). Codes marked as verified were confirmed by
-driving them on a real hood; the rest are assigned by elimination and may still be swapped. Whether a hood
-performs a function at all depends on its equipment.
+the function names come from the Berbel manual. Every code in the table has been measured; the Verified column
+says where. Whether a hood performs a function at all depends on its equipment.
 
 | Code | Function | Berbel Manual Term | Verified |
 |------|----------|--------------------|----------|
-| 0x01 | Power | EIN/AUS | yes |
-| 0x02 | Fan 1 | Leistungsstufe 1 | yes |
-| 0x03 | Fan 2 | Leistungsstufe 2 | yes |
-| 0x04 | Fan 3 | Leistungsstufe 3 | yes |
-| 0x05 | Fan P | Leistungsstufe POWER | yes |
-| 0x06 | Effect Light (Oberlicht) | Effektbeleuchtung | yes |
-| 0x07 | Sync | Synchronisation | no, by elimination |
-| 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter | no, by elimination |
-| 0x09 | Raise | Liftfunktion "Heben" | yes |
-| 0x0A | Cooktop Light (Unterlicht) | Kochfeld-Beleuchtung | yes |
-| 0x0B | Multifunction | Multifunktionstaste (assigned in the Berbel app, e.g. Deckenanschluss mit Effektbeleuchtung) | yes |
-| 0x0C | Afterrun | Nachlauffunktion | yes |
-| 0x0D | Lower | Liftfunktion "Senken" | yes |
-| 0x12 | Ceiling Light | Deckenlicht, Skyline Edge only | yes, on a Skyline Edge Play |
+| 0x01 | Power | EIN/AUS | on a hood, and on a BFB 8bT |
+| 0x02 | Fan 1 | Leistungsstufe 1 | on a hood, and on a BFB 8bT |
+| 0x03 | Fan 2 | Leistungsstufe 2 | on a hood, and on a BFB 8bT |
+| 0x04 | Fan 3 | Leistungsstufe 3 | on a hood, and on a BFB 8bT |
+| 0x05 | Fan P | Leistungsstufe POWER | on a hood, and on a BFB 8bT |
+| 0x06 | Effect Light (Oberlicht) | Effektbeleuchtung | on a hood, and on a BFB 8bT |
+| 0x07 | Sync | Synchronisation | on a BFB 8bT |
+| 0x08 | Recirculation | Umluftbetrieb / Kontrollanzeige Filter-Füllung | on a BFB 8bT |
+| 0x09 | Raise | Liftfunktion "Heben" | on a hood, and on a BFB 8bT |
+| 0x0A | Cooktop Light (Unterlicht) | Kochfeld-Beleuchtung | on a hood, and on a BFB 8bT |
+| 0x0B | Multifunction | Multifunktionstaste (assigned in the Berbel app, e.g. Deckenanschluss mit Effektbeleuchtung) | on a hood, and on a BFB 8bT |
+| 0x0C | Afterrun | Nachlauffunktion | on a hood, and on a BFB 8bT |
+| 0x0D | Lower | Liftfunktion "Senken" | on a hood, and on a BFB 8bT |
+| 0x12 | Uplight / Ceiling Light | Uplight, Skyline Edge only; not a 6bT or 8bT button | on a Skyline Edge Play, and on a BFB 7bT |
 
-`0x01` to `0x0D` are the BFB 6bT's own buttons. `0x12` is not: it was found on a
-Skyline Edge Play, whose BFB 7bT has 19 buttons where the 6bT has 13, so more
-codes exist above `0x0D` than anyone has recorded
-([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)).
+`0x07` and `0x08` were the two rows this table used to mark "by elimination", because no hood here performs
+either function. They are now read straight off a BFB 8bT and matched to the symbol table in that remote's
+manual, which also confirms the guess had been right.
+
+`0x01` to `0x0D` are the buttons of the BFB 6bT and, measured, of the BFB 8bT as well. The BFB 7bT adds
+`0x0E` and `0x12` to `0x17` on top; the full table across all three remotes is in
+[REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
+
+A **long press sends no separate code**. The remote sends the ordinary press and delays the release, so the
+hood measures the duration. Anything reachable by holding a key is therefore reachable from this firmware
+too, through the hold time of `berbel/hood/debug/send`.
 
 Protocol: 2-byte notifications on characteristic `f004f002-...-berbel`. Press: `[code, 0x00]`, Release: `[0x00, 0x00]`.
 
@@ -236,7 +292,7 @@ The hood sends 9-byte status packets on characteristic `f004f001-...-berbel`. Al
 | [0] | 0x10 | Fan Stufe 1 |
 | [1] | 0x01 | Fan Stufe 2 |
 | [1] | 0x10 | Fan Stufe 3 |
-| [2] | 0x09 | Fan Power |
+| [2] | 0x01 | Fan Power |
 | [2] | 0x10 | Oberlicht (upper light) |
 | [4] | 0x10 | Unterlicht (cooktop light) |
 | [4] | 0x01 | Cover moving up (retracting) *(`HOOD_HAS_LIFT` only)* |
@@ -250,9 +306,15 @@ A sync packet (all bytes `0x11`) is sent on connect and should be ignored.
 
 ### MAC Address OUI Filtering
 
-The hood only accepts connections from devices with a Texas Instruments OUI:
+The hood only accepts connections from devices with a Texas Instruments OUI. Four
+remotes have been seen, carrying four different TI prefixes:
 - `88:01:F9:xx:xx:xx`
 - `30:AF:7E:xx:xx:xx`
+- `FC:DE:C5:xx:xx:xx` (BFB 8bT)
+- `0C:0A:DF:xx:xx:xx` (BFB 7bT)
+
+Treat that as a sample rather than the whole list: the hood tests for the
+manufacturer, not for these four values. Spoofing any of them works.
 
 The ESP32 MAC is spoofed before BLE initialization:
 ```cpp
@@ -289,6 +351,14 @@ NimBLE keeps no copy of custom advertising data, it only flags that custom data 
 4. Mapped all 13 button codes by pressing each button and recording notifications
 5. Decoded 9-byte hood status packets by systematically toggling each function
 6. Confirmed findings with a second remote (different TI OUI, identical protocol)
+7. Built a **fake hood** and read a remote out directly, with no hood involved
+
+Step 7 turns the arrangement around. The remote is the BLE peripheral and the hood
+is the central, so a Linux box with a BLE adapter can play the hood: bond with a
+remote, subscribe to its button characteristic and record every code it sends,
+including codes no hood in reach would act on. The tool is
+[`tools/fakehood/`](tools/fakehood/) and the method is written up in
+[docs/fake-hood.md](docs/fake-hood.md).
 
 See [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md) for the full protocol documentation including GATT service tables, advertising data, and Wireshark analysis commands.
 
@@ -300,11 +370,17 @@ berbel-remote/
 │   ├── src/
 │   │   ├── main.cpp              # Firmware: BLE/WiFi/MQTT wiring
 │   │   ├── berbel_protocol.h     # Pure protocol logic (unit-tested)
+│   │   ├── remote_profile.h      # Which remote to emulate (6bT / 8bT / 7bT)
 │   │   ├── config.example.h      # WiFi/MQTT config template
 │   │   └── config.h              # Your credentials (gitignored)
 │   ├── test/
 │   │   └── test_protocol/        # Host-side unit tests (Unity)
 │   └── platformio.ini            # Build configuration
+├── tools/
+│   └── fakehood/                 # Fake hood: read a remote out over BLE
+├── docs/
+│   ├── fake-hood.md              # Reading a remote out, and what it revealed
+│   └── remote-logging.md         # Firmware log over MQTT
 ├── .github/workflows/test.yml     # CI: unit tests + firmware build
 ├── REVERSE_ENGINEERING.md         # Full protocol documentation
 ├── berbel_button_map.json        # Button code mapping (machine-readable)
@@ -323,8 +399,16 @@ cd BerbelRemote
 pio test -e native
 ```
 
-CI runs these tests and a full firmware compile check on every push (see the
-tests badge at the top). The hardware I/O (BLE, WiFi, MQTT, OTA) is exercised on
+The fake hood's protocol half is separated the same way, in
+`tools/fakehood/hood.py`, and imports no Bluetooth stack:
+
+```bash
+python3 -m unittest discover -s tools/fakehood -p "test_*.py"
+```
+
+CI runs both suites, a firmware compile check for every remote profile and
+every hood feature flag combination, on each push (see the tests badge at the
+top). The hardware I/O (BLE, WiFi, MQTT, OTA) is exercised on
 the device, not in CI.
 
 ## Contributing

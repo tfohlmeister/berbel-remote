@@ -29,11 +29,29 @@ jobs:
       - name: Run native unit tests
         run: pio test -e native -d BerbelRemote
 
+      # The fake hood's protocol half lives in tools/fakehood/hood.py and
+      # imports no Bluetooth stack, so its tests run here without bleak.
+      - name: Run fake hood tests
+        run: python -m unittest discover -s tools/fakehood -p "test_*.py" -v
+
       - name: Build firmware (compile check)
         run: |
           cp BerbelRemote/src/config.example.h BerbelRemote/src/config.h
           pio run -e esp32dev -d BerbelRemote
           pio run -e esp32s3 -d BerbelRemote
+
+      # Each remote profile switches different entities and button codes on, so
+      # a build that only ever sees the default one never compiles the others.
+      - name: Build firmware (all remote profiles)
+        run: |
+          for profile in REMOTE_BFB_6BT REMOTE_BFB_8BT REMOTE_BFB_7BT; do
+            echo "::group::REMOTE_PROFILE=$profile"
+            sed -e "s/^#define REMOTE_PROFILE .*/#define REMOTE_PROFILE $profile/" \
+                -e "s/^#define HOOD_HAS_CEILING_LIGHT .*/#define HOOD_HAS_CEILING_LIGHT true/" \
+                BerbelRemote/src/config.example.h > BerbelRemote/src/config.h
+            pio run -e esp32dev -d BerbelRemote
+            echo "::endgroup::"
+          done
 
       # config.example.h only covers one combination of the hood feature flags.
       # Build the others too, otherwise a typo inside a disabled #if block

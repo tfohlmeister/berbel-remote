@@ -21,6 +21,24 @@
 // Home Assistant; that choice is retained and survives a reboot.
 #define REMOTE_LOG_DEFAULT false
 
+// Which remote to emulate. Three exist and they do not share one vocabulary:
+//
+//   REMOTE_BFB_6BT  13 keys, codes 0x01-0x0D (Art. 1090045, discontinued)
+//   REMOTE_BFB_8BT  the same 13 codes, the 6bT's replacement (Art. 1090093)
+//   REMOTE_BFB_7BT  19 keys, adds colour temperature per lamp, Motion-Lights
+//                   and a dedicated Uplight key (Art. 1090084, ships with the
+//                   Skyline Edge Base and Play)
+//
+// Pick the one that came with your hood. The 6bT and 8bT emit an identical set
+// of codes, measured on both, so either choice reaches the same hoods; the name
+// only decides what this firmware calls itself in the log.
+//
+// The 7bT profile adds five Home Assistant buttons for the keys the other two
+// do not have, and points the Deckenlicht entity at the Uplight code 0x12
+// instead of the multifunction key. Those keys were read off a real 7bT but
+// never driven at a hood, so what a hood does with them is untested.
+#define REMOTE_PROFILE REMOTE_BFB_6BT
+
 // Hood features
 // Set to false if your hood has no lift ("Liftfunktion Heben/Senken").
 // When false, Position, Hochfahren, Herunterfahren, and Cover State
@@ -48,10 +66,11 @@
 // HOOD_HAS_MULTI_BUTTON instead.
 #define HOOD_HAS_CEILING_LIGHT false
 
-// Which button code the Deckenlicht entity presses. The default is the
-// multifunction key (0x0B), which is how a BFB 6bT hood drives that lamp.
-// A Skyline Edge Play has a dedicated code for it instead, verified on real
-// hardware in issue #3, and presumably the Skyline Edge Base does too:
+// Which button code the Deckenlicht entity presses. With REMOTE_BFB_6BT or
+// REMOTE_BFB_8BT the default is the multifunction key (0x0B), which is how a
+// BFB 6bT hood drives that lamp. With REMOTE_BFB_7BT it is 0x12, the Uplight
+// key that remote has for it, verified on a Skyline Edge Play in issue #3 and
+// on a BFB 7bT here. Setting it explicitly still overrides both:
 //   #define BTN_LIGHT_CEILING 0x12
 // If your hood does neither, berbel/hood/debug/send can find the code, see
 // the README.

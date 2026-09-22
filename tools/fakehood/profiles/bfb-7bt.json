@@ -1,0 +1,418 @@
+{
+  "recorded": "2026-09-22T15:39:09+02:00",
+  "remote": "BFB 7BT",
+  "address": "0C:0A:DF:AC:C9:FC",
+  "status_frame_bytes": 13,
+  "raw_advertising": {
+    "captured_with": "btmon on Linux, the only view of the actual advertising PDU",
+    "normal_operation": {
+      "adv_ind": "02 01 06 12 21 6c 65 62 72 65 62 43 80 53 40 45 57 00 f0 00 f0 00",
+      "scan_response": null,
+      "note": "Advertising to reconnect to a hood it is already bonded to."
+    },
+    "pairing_mode": {
+      "adv_ind": "02 01 06 12 21 6c 65 62 72 65 62 43 80 53 40 45 57 00 f0 00 f0 01",
+      "scan_response": "0c 09 48 6f 6f 64 20 42 4c 45 20 76 37 04 0d 0c 05 20",
+      "note": "After holding 1 + P for more than 3 s, LED blinking. The scan response carries the Complete Local Name 'Hood BLE v7' and a Class of Device field 0x20050C."
+    }
+  },
+  "advertisement_as_bluez_saw_it": {
+    "local_name": "Hood BLE v7",
+    "rssi": -61,
+    "tx_power": null,
+    "service_uuids": [
+      "00001800-0000-1000-8000-00805f9b34fb",
+      "00001801-0000-1000-8000-00805f9b34fb",
+      "0000180a-0000-1000-8000-00805f9b34fb",
+      "0000180f-0000-1000-8000-00805f9b34fb",
+      "00001812-0000-1000-8000-00805f9b34fb",
+      "0000fe0b-0000-1000-8000-00805f9b34fb",
+      "f000f000-5745-4053-8043-62657262656c",
+      "f004f000-5745-4053-8043-62657262656c"
+    ],
+    "service_data": {
+      "f000f000-5745-4053-8043-62657262656c": "00"
+    },
+    "manufacturer_data": {},
+    "caveat": "BlueZ's view of the device, not the raw PDU: it fills local_name and service_uuids from the GATT database as well, so trust raw_advertising for what actually goes over the air."
+  },
+  "services": [
+    {
+      "uuid": "00001801-0000-1000-8000-00805f9b34fb",
+      "description": "Generic Attribute Profile",
+      "characteristics": [
+        {
+          "uuid": "00002a05-0000-1000-8000-00805f9b34fb",
+          "handle": 2,
+          "description": "Service Changed",
+          "properties": [
+            "indicate"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 4
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uuid": "00001800-0000-1000-8000-00805f9b34fb",
+      "description": "Generic Access Profile",
+      "characteristics": [
+        {
+          "uuid": "00002a04-0000-1000-8000-00805f9b34fb",
+          "handle": 10,
+          "description": "Peripheral Preferred Connection Parameters",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "180024000a00c800"
+        },
+        {
+          "uuid": "00002ac9-0000-1000-8000-00805f9b34fb",
+          "handle": 12,
+          "description": "Resolvable Private Address Only",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "00"
+        },
+        {
+          "uuid": "00002a00-0000-1000-8000-00805f9b34fb",
+          "handle": 6,
+          "description": "Device Name",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "486f6f6420424c45207637",
+          "value_text": "Hood BLE v7"
+        },
+        {
+          "uuid": "00002a01-0000-1000-8000-00805f9b34fb",
+          "handle": 8,
+          "description": "Appearance",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "8001"
+        }
+      ]
+    },
+    {
+      "uuid": "0000180a-0000-1000-8000-00805f9b34fb",
+      "description": "Device Information",
+      "characteristics": [
+        {
+          "uuid": "00002a50-0000-1000-8000-00805f9b34fb",
+          "handle": 29,
+          "description": "PnP ID",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "029b1129210100"
+        },
+        {
+          "uuid": "00002a24-0000-1000-8000-00805f9b34fb",
+          "handle": 17,
+          "description": "Model Number String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "78464237",
+          "value_text": "xFB7"
+        },
+        {
+          "uuid": "00002a26-0000-1000-8000-00805f9b34fb",
+          "handle": 21,
+          "description": "Firmware Revision String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "312e302e3537",
+          "value_text": "1.0.57"
+        },
+        {
+          "uuid": "00002a27-0000-1000-8000-00805f9b34fb",
+          "handle": 23,
+          "description": "Hardware Revision String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "30783030324530323031",
+          "value_text": "0x002E0201"
+        },
+        {
+          "uuid": "00002a23-0000-1000-8000-00805f9b34fb",
+          "handle": 15,
+          "description": "System ID",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "fcc9acfeffdf0a0c"
+        },
+        {
+          "uuid": "00002a25-0000-1000-8000-00805f9b34fb",
+          "handle": 19,
+          "description": "Serial Number String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "30433a30413a44463a41433a43393a4643",
+          "value_text": "0C:0A:DF:AC:C9:FC"
+        },
+        {
+          "uuid": "00002a29-0000-1000-8000-00805f9b34fb",
+          "handle": 27,
+          "description": "Manufacturer Name String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "62657262656c",
+          "value_text": "berbel"
+        },
+        {
+          "uuid": "00002a28-0000-1000-8000-00805f9b34fb",
+          "handle": 25,
+          "description": "Software Revision String",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "362e342e3638",
+          "value_text": "6.4.68"
+        }
+      ]
+    },
+    {
+      "uuid": "0000180f-0000-1000-8000-00805f9b34fb",
+      "description": "Battery Service",
+      "characteristics": [
+        {
+          "uuid": "00002a19-0000-1000-8000-00805f9b34fb",
+          "handle": 32,
+          "description": "Battery Level",
+          "properties": [
+            "read",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 34
+            },
+            {
+              "uuid": "00002904-0000-1000-8000-00805f9b34fb",
+              "handle": 36
+            },
+            {
+              "uuid": "00002908-0000-1000-8000-00805f9b34fb",
+              "handle": 35
+            }
+          ],
+          "value_hex": "64",
+          "value_text": "d"
+        }
+      ]
+    },
+    {
+      "uuid": "f004f000-5745-4053-8043-62657262656c",
+      "description": "Unknown",
+      "characteristics": [
+        {
+          "uuid": "f004f001-5745-4053-8043-62657262656c",
+          "handle": 64,
+          "description": "Unknown",
+          "properties": [
+            "read",
+            "write-without-response"
+          ],
+          "descriptors": [],
+          "value_hex": "00000000000000000000000000"
+        },
+        {
+          "uuid": "f004f002-5745-4053-8043-62657262656c",
+          "handle": 66,
+          "description": "Unknown",
+          "properties": [
+            "read",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 68
+            }
+          ],
+          "value_hex": "0000"
+        }
+      ]
+    },
+    {
+      "uuid": "0000fe0b-0000-1000-8000-00805f9b34fb",
+      "description": "Vendor specific",
+      "characteristics": [
+        {
+          "uuid": "00000002-bebc-4ca4-a6f8-bb896399027f",
+          "handle": 70,
+          "description": "Unknown",
+          "properties": [
+            "write-without-response",
+            "write",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 72
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "uuid": "00001812-0000-1000-8000-00805f9b34fb",
+      "description": "Human Interface Device",
+      "characteristics": [
+        {
+          "uuid": "00002a4d-0000-1000-8000-00805f9b34fb",
+          "handle": 48,
+          "description": "Report",
+          "properties": [
+            "read",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 50
+            },
+            {
+              "uuid": "00002908-0000-1000-8000-00805f9b34fb",
+              "handle": 51
+            }
+          ],
+          "value_hex": "",
+          "value_text": ""
+        },
+        {
+          "uuid": "00002a4d-0000-1000-8000-00805f9b34fb",
+          "handle": 59,
+          "description": "Report",
+          "properties": [
+            "read",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 61
+            },
+            {
+              "uuid": "00002908-0000-1000-8000-00805f9b34fb",
+              "handle": 62
+            }
+          ],
+          "value_hex": "",
+          "value_text": ""
+        },
+        {
+          "uuid": "00002a4e-0000-1000-8000-00805f9b34fb",
+          "handle": 43,
+          "description": "Protocol Mode",
+          "properties": [
+            "read",
+            "write-without-response"
+          ],
+          "descriptors": [],
+          "value_hex": "01"
+        },
+        {
+          "uuid": "00002a4b-0000-1000-8000-00805f9b34fb",
+          "handle": 45,
+          "description": "Report Map",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002907-0000-1000-8000-00805f9b34fb",
+              "handle": 47
+            }
+          ],
+          "value_hex": "05010906a1018502050719e029e71500250175019508810295017508810175089506150025ff0507190029130900191529ff8100c0050c0901a1018503150026ff03190029350900193729df090019e12aff03751095028100c00600ff0900a101850f150025ff750895140900810209009102c0"
+        },
+        {
+          "uuid": "00002a4a-0000-1000-8000-00805f9b34fb",
+          "handle": 39,
+          "description": "HID Information",
+          "properties": [
+            "read"
+          ],
+          "descriptors": [],
+          "value_hex": "11010002"
+        },
+        {
+          "uuid": "00002a4c-0000-1000-8000-00805f9b34fb",
+          "handle": 41,
+          "description": "HID Control Point",
+          "properties": [
+            "write-without-response"
+          ],
+          "descriptors": []
+        },
+        {
+          "uuid": "00002a4d-0000-1000-8000-00805f9b34fb",
+          "handle": 56,
+          "description": "Report",
+          "properties": [
+            "read",
+            "write-without-response",
+            "write"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002908-0000-1000-8000-00805f9b34fb",
+              "handle": 58
+            }
+          ],
+          "value_hex": "",
+          "value_text": ""
+        },
+        {
+          "uuid": "00002a4d-0000-1000-8000-00805f9b34fb",
+          "handle": 52,
+          "description": "Report",
+          "properties": [
+            "read",
+            "notify"
+          ],
+          "descriptors": [
+            {
+              "uuid": "00002902-0000-1000-8000-00805f9b34fb",
+              "handle": 54
+            },
+            {
+              "uuid": "00002908-0000-1000-8000-00805f9b34fb",
+              "handle": 55
+            }
+          ],
+          "value_hex": "",
+          "value_text": ""
+        }
+      ]
+    }
+  ]
+}

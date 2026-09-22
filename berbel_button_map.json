@@ -76,7 +76,7 @@
       "code": 11,
       "hex": "0b 00",
       "label": "multi",
-      "description": "Multifunktionstaste (e.g. Deckenanschluss mit Effektbeleuchtung)"
+      "description": "Multifunktionstaste (BFB 6bT/8bT, in der Berbel-App belegt) / Favoritenszene (BFB 7bT) - ein Code, zwei Beschriftungen"
     },
     "0x0c": {
       "code": 12,
@@ -89,6 +89,48 @@
       "hex": "0d 00",
       "label": "move_down",
       "description": "Liftfunktion \"Senken\""
+    },
+    "0x0e": {
+      "code": 14,
+      "hex": "0e 00",
+      "label": "no_function",
+      "description": "\"A\", ohne Funktion (BFB 7bT)"
+    },
+    "0x12": {
+      "code": 18,
+      "hex": "12 00",
+      "label": "light_uplight",
+      "description": "Uplight (BFB 7bT, nur BIH SKEP); in dieser Firmware Deckenlicht"
+    },
+    "0x13": {
+      "code": 19,
+      "hex": "13 00",
+      "label": "colour_temp_uplight",
+      "description": "Farbtemperatur Uplight (BFB 7bT, nur BIH SKEP)"
+    },
+    "0x14": {
+      "code": 20,
+      "hex": "14 00",
+      "label": "colour_temp_light_down",
+      "description": "Farbtemperatur der Kochfeld-Beleuchtung (BFB 7bT)"
+    },
+    "0x15": {
+      "code": 21,
+      "hex": "15 00",
+      "label": "colour_temp_light_up",
+      "description": "Farbtemperatur der Effektbeleuchtung (BFB 7bT)"
+    },
+    "0x16": {
+      "code": 22,
+      "hex": "16 00",
+      "label": "motion_lights",
+      "description": "Motion-Lights ein-/ausschalten (BFB 7bT, nur BIH SKEP)"
+    },
+    "0x17": {
+      "code": 23,
+      "hex": "17 00",
+      "label": "motion_lights_next",
+      "description": "Motion-Lights durch-/weiterschalten (BFB 7bT, nur BIH SKEP)"
     }
   },
   "buttons_by_label": {
@@ -104,8 +146,43 @@
     "light_down": 10,
     "multi": 11,
     "timer": 12,
-    "move_down": 13
+    "move_down": 13,
+    "light_uplight": 18,
+    "colour_temp_uplight": 19,
+    "colour_temp_light_down": 20,
+    "colour_temp_light_up": 21,
+    "motion_lights": 22,
+    "motion_lights_next": 23,
+    "no_function": 14
   },
-  "capture_date": "2026-01-03",
-  "notes": "Complete button mapping for the Berbel BFB 6bT remote control, 13 buttons, codes 0x01-0x0D. The codes are reverse engineered; the function names come from the Berbel manual 6005229_0, which does not publish the codes. The light assignment was confirmed on real hoods and is the reverse of the manual's function-table order, so 0x07 and 0x08 (assigned by elimination) may still be swapped. Which functions a button performs depends on the hood's equipment."
+  "capture_date": "2026-09-22",
+  "notes": "Button codes for the Berbel remotes. The BFB 6bT and BFB 8bT have 13 buttons on 0x01-0x0D; the BFB 7bT has 19 on 0x01-0x0E and 0x12-0x17, without 0x07 since it has no Synchronisation key. Every code here was measured: the 8bT and the 7bT were read out button by button with tools/fakehood, and each code matched to its key through the symbol tables in the berbel manuals 6007335_0 (8bT) and 6007021_0 (7bT). 0x07 and 0x08 used to be assigned by elimination and are now measured. 0x0F to 0x11 were emitted by no button on either remote. Which functions a button performs depends on the hood's equipment; the remote sends the code either way.",
+  "remotes": {
+    "BFB 6bT": {
+      "article": "1090045",
+      "buttons": 13,
+      "codes": "0x01-0x0D",
+      "status_frame_bytes": 9,
+      "device_name": null
+    },
+    "BFB 8bT": {
+      "article": "1090093",
+      "buttons": 13,
+      "codes": "0x01-0x0D",
+      "status_frame_bytes": 9,
+      "mac_oui": "FC:DE:C5",
+      "device_name": "Hood BLE v6.1",
+      "device_name_advertised": false
+    },
+    "BFB 7bT": {
+      "article": "1090084",
+      "buttons": 19,
+      "codes": "0x01-0x06, 0x08-0x0E, 0x12-0x17 (no 0x07)",
+      "status_frame_bytes": 13,
+      "mac_oui": "0C:0A:DF",
+      "device_name": "Hood BLE v7",
+      "device_name_advertised": true
+    }
+  },
+  "long_press": "No separate code. The press is the ordinary [code, 0x00] and the release [0x00, 0x00] simply comes later, so the hood measures the duration. Resolution is the 45 ms connection interval."
 }

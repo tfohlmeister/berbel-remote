@@ -19,3 +19,7 @@ BerbelRemote/src/config.h
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode from tools/
+__pycache__/
+*.pyc

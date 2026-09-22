@@ -17,7 +17,7 @@
  *   Byte[0] & 0x10  = Fan Stufe 1
  *   Byte[1] & 0x01  = Fan Stufe 2
  *   Byte[1] & 0x10  = Fan Stufe 3
- *   Byte[2] & 0x09  = Fan Power
+ *   Byte[2] & 0x01  = Fan Power (0x08 alongside it is a separate unknown flag)
  *   Byte[2] & 0x10  = Oberlicht (upper light)
  *   Byte[4] & 0x10  = Unterlicht (lower light)
  *   Byte[4] & 0x01  = Cover moving up (retracting)
@@ -63,6 +63,7 @@
 #include <ArduinoOTA.h>
 
 #include "config.h"
+#include "remote_profile.h"
 #include "berbel_protocol.h"
 
 // Feature flags added after the initial release. A config.h from an older
@@ -124,9 +125,16 @@
 
 // Which code the Deckenlicht entity presses. A BFB 6bT hood drives that lamp
 // from the multifunction key; a Skyline Edge Play has a dedicated code for it
-// (0x12) and does not use 0x0B. Override in config.h.
+// (0x12, the Uplight key on a BFB 7bT) and does not use 0x0B. The 7bT profile
+// therefore defaults to that code, which is what its own remote sends.
+// An explicit BTN_LIGHT_CEILING in config.h still wins, so a checkout that set
+// it by hand before this profile existed keeps working.
 #ifndef BTN_LIGHT_CEILING
+#if REMOTE_HAS_UPLIGHT
+#define BTN_LIGHT_CEILING BTN_UPLIGHT
+#else
 #define BTN_LIGHT_CEILING BTN_MULTI
+#endif
 #endif
 
 // How long a button is held down. The original remote is not this precise, but
@@ -156,6 +164,15 @@
 #define MQTT_CMD_POSITION   MQTT_BASE "/position/set"
 #define MQTT_CMD_MOVE_UP    MQTT_BASE "/move_up/set"
 #define MQTT_CMD_MOVE_DOWN  MQTT_BASE "/move_down/set"
+#endif
+#if REMOTE_HAS_COLOUR_TEMP
+#define MQTT_CMD_TEMP_LIGHT_UP   MQTT_BASE "/temp_light_up/set"
+#define MQTT_CMD_TEMP_LIGHT_DOWN MQTT_BASE "/temp_light_down/set"
+#define MQTT_CMD_TEMP_UPLIGHT    MQTT_BASE "/temp_uplight/set"
+#endif
+#if REMOTE_HAS_MOTION_LIGHTS
+#define MQTT_CMD_MOTION_LIGHTS   MQTT_BASE "/motion_lights/set"
+#define MQTT_CMD_MOTION_NEXT     MQTT_BASE "/motion_next/set"
 #endif
 #define MQTT_CMD_DEBUG      MQTT_BASE "/debug/send"
 #define MQTT_LOG            MQTT_BASE "/log"
@@ -780,6 +797,15 @@ void cleanupOldDiscovery() {
 #if !HOOD_HAS_MULTI_BUTTON
     "homeassistant/button/berbel_hood/multi/config",
 #endif
+#if !REMOTE_HAS_COLOUR_TEMP
+    "homeassistant/button/berbel_hood/temp_light_up/config",
+    "homeassistant/button/berbel_hood/temp_light_down/config",
+    "homeassistant/button/berbel_hood/temp_uplight/config",
+#endif
+#if !REMOTE_HAS_MOTION_LIGHTS
+    "homeassistant/button/berbel_hood/motion_lights/config",
+    "homeassistant/button/berbel_hood/motion_next/config",
+#endif
 #if !HOOD_HAS_LIFT
     "homeassistant/select/berbel_hood/position/config",
     "homeassistant/button/berbel_hood/move_up/config",
@@ -925,6 +951,56 @@ void publishDiscovery() {
     "\"uniq_id\":\"berbel_multi\","
     "\"cmd_t\":\"" MQTT_CMD_MULTI "\","
     "\"ic\":\"mdi:gesture-tap-button\""
+  );
+#endif
+
+#if REMOTE_HAS_COLOUR_TEMP
+  // Colour temperature, one key per lamp. Button entities rather than lights or
+  // selects: a press starts a colour sweep that a second press stops wherever it
+  // happens to be, and the status frame carries no field for the result, so
+  // there is no state to track and claiming one would be a lie.
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/temp_light_up/config",
+    "\"name\":\"Farbtemperatur Oberlicht\","
+    "\"uniq_id\":\"berbel_temp_light_up\","
+    "\"cmd_t\":\"" MQTT_CMD_TEMP_LIGHT_UP "\","
+    "\"ic\":\"mdi:thermometer\""
+  );
+
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/temp_light_down/config",
+    "\"name\":\"Farbtemperatur Unterlicht\","
+    "\"uniq_id\":\"berbel_temp_light_down\","
+    "\"cmd_t\":\"" MQTT_CMD_TEMP_LIGHT_DOWN "\","
+    "\"ic\":\"mdi:thermometer\""
+  );
+
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/temp_uplight/config",
+    "\"name\":\"Farbtemperatur Deckenlicht\","
+    "\"uniq_id\":\"berbel_temp_uplight\","
+    "\"cmd_t\":\"" MQTT_CMD_TEMP_UPLIGHT "\","
+    "\"ic\":\"mdi:thermometer\""
+  );
+#endif
+
+#if REMOTE_HAS_MOTION_LIGHTS
+  // Motion-Lights. The first key toggles them, the second steps to the next one.
+  // Buttons for the same reason as above: the hood reports neither.
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/motion_lights/config",
+    "\"name\":\"Motion-Lights\","
+    "\"uniq_id\":\"berbel_motion_lights\","
+    "\"cmd_t\":\"" MQTT_CMD_MOTION_LIGHTS "\","
+    "\"ic\":\"mdi:motion-sensor\""
+  );
+
+  publishDiscoveryMsg(
+    "homeassistant/button/berbel_hood/motion_next/config",
+    "\"name\":\"Motion-Lights weiterschalten\","
+    "\"uniq_id\":\"berbel_motion_next\","
+    "\"cmd_t\":\"" MQTT_CMD_MOTION_NEXT "\","
+    "\"ic\":\"mdi:skip-next-outline\""
   );
 #endif
 
@@ -1085,6 +1161,27 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     queueButton(BTN_MULTI, "Multi");
   }
 #endif
+#if REMOTE_HAS_COLOUR_TEMP
+  // One press starts the colour sweep, the next one picks whatever is showing.
+  // Both are the same key, so both are the same press.
+  else if (t == MQTT_CMD_TEMP_LIGHT_UP) {
+    queueButton(BTN_TEMP_LIGHT_UP, "Temp Oberlicht");
+  }
+  else if (t == MQTT_CMD_TEMP_LIGHT_DOWN) {
+    queueButton(BTN_TEMP_LIGHT_DOWN, "Temp Unterlicht");
+  }
+  else if (t == MQTT_CMD_TEMP_UPLIGHT) {
+    queueButton(BTN_TEMP_UPLIGHT, "Temp Deckenlicht");
+  }
+#endif
+#if REMOTE_HAS_MOTION_LIGHTS
+  else if (t == MQTT_CMD_MOTION_LIGHTS) {
+    queueButton(BTN_MOTION_LIGHTS, "Motion-Lights");
+  }
+  else if (t == MQTT_CMD_MOTION_NEXT) {
+    queueButton(BTN_MOTION_NEXT, "Motion-Lights weiter");
+  }
+#endif
   // Power button (Ausschalten)
   else if (t == MQTT_CMD_POWER) {
     queueButton(BTN_POWER, "Power Off");
@@ -1243,6 +1340,15 @@ void mqttReconnect() {
     mqtt.subscribe(MQTT_CMD_MOVE_UP);
     mqtt.subscribe(MQTT_CMD_MOVE_DOWN);
 #endif
+#if REMOTE_HAS_COLOUR_TEMP
+    mqtt.subscribe(MQTT_CMD_TEMP_LIGHT_UP);
+    mqtt.subscribe(MQTT_CMD_TEMP_LIGHT_DOWN);
+    mqtt.subscribe(MQTT_CMD_TEMP_UPLIGHT);
+#endif
+#if REMOTE_HAS_MOTION_LIGHTS
+    mqtt.subscribe(MQTT_CMD_MOTION_LIGHTS);
+    mqtt.subscribe(MQTT_CMD_MOTION_NEXT);
+#endif
     mqtt.subscribe(MQTT_CMD_DEBUG);
     mqtt.subscribe(MQTT_CMD_LOG);
     mqtt.subscribe("homeassistant/status");
@@ -1292,6 +1398,7 @@ void setup() {
   uint8_t ti_mac[6] = {0x88, 0x01, 0xF9, 0xAA, 0xBB, 0xCC};
   esp_base_mac_addr_set(ti_mac);
 
+  Log.printf("[BLE] Emulating a %s remote\n", REMOTE_NAME);
   Log.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("");
 

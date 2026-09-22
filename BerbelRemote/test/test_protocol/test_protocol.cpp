@@ -318,6 +318,47 @@ void test_long_frame_fan_steps(void) {
   TEST_ASSERT_EQUAL_UINT8(3, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
 }
 
+// Fan Power on the long layout is 0x01 alone. Measured against a BFB 7bT's own
+// key lighting: 0x01 lights the P key, 0x08 lights nothing, both make it blink.
+void test_long_frame_fan_power(void) {
+  uint8_t raw[STATUS_MAX_LEN] = {0};
+  raw[2] = 0x01;
+  TEST_ASSERT_EQUAL_UINT8(4, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+
+  // Both bits together is what a hood was assumed to send, and still counts.
+  memset(raw, 0, sizeof(raw));
+  raw[2] = 0x09;
+  TEST_ASSERT_EQUAL_UINT8(4, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+
+  // 0x08 on its own is a separate flag of unknown meaning, not Fan Power.
+  memset(raw, 0, sizeof(raw));
+  raw[2] = 0x08;
+  TEST_ASSERT_EQUAL_UINT8(0, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+
+  // And it must not swallow a lower step that is set alongside it.
+  memset(raw, 0, sizeof(raw));
+  raw[0] = 0x10;
+  raw[2] = 0x08;
+  TEST_ASSERT_EQUAL_UINT8(1, decodeHoodStatus(raw, STATUS_MAX_LEN).fanSpeed);
+}
+
+// The short layout holds the two bits apart the same way. A Skyline Frame on
+// Power was measured sending 0x09, which still reads as Power; 0x08 alone has
+// never come from a hood and must not.
+void test_short_frame_fan_power(void) {
+  uint8_t raw[9] = {0};
+  raw[2] = 0x09;  // what a real hood sends on Power
+  TEST_ASSERT_EQUAL_UINT8(4, decodeHoodStatus(raw).fanSpeed);
+
+  memset(raw, 0, sizeof(raw));
+  raw[2] = 0x01;
+  TEST_ASSERT_EQUAL_UINT8(4, decodeHoodStatus(raw).fanSpeed);
+
+  memset(raw, 0, sizeof(raw));
+  raw[2] = 0x08;
+  TEST_ASSERT_EQUAL_UINT8(0, decodeHoodStatus(raw).fanSpeed);
+}
+
 // A hood whose frame length we have never seen falls back to the short layout,
 // both below and above the lengths we do know.
 void test_unknown_frame_length_uses_short_layout(void) {
@@ -505,6 +546,8 @@ int main(int, char**) {
   RUN_TEST(test_json_get_value_missing_key);
   RUN_TEST(test_json_get_value_buffer_too_small);
 
+  RUN_TEST(test_long_frame_fan_power);
+  RUN_TEST(test_short_frame_fan_power);
   RUN_TEST(test_long_frame_all_off);
   RUN_TEST(test_long_frame_light_down);
   RUN_TEST(test_long_frame_light_ceiling);
