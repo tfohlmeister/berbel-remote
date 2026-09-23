@@ -56,18 +56,24 @@ jobs:
       # config.example.h only covers one combination of the hood feature flags.
       # Build the others too, otherwise a typo inside a disabled #if block
       # passes CI and breaks only for the users who enable that flag.
+      # The 6bT profile is the example's default, so without the profile loop
+      # here the 7bT's #if blocks would only ever be compiled at one flag
+      # combination and a typo under, say, HOOD_HAS_LIFT=false would pass.
       - name: Build firmware (all hood feature flag combinations)
         run: |
-          for lift in true false; do
-            for ceiling in true false; do
-              for multi in true false; do
-                echo "::group::HOOD_HAS_LIFT=$lift HOOD_HAS_CEILING_LIGHT=$ceiling HOOD_HAS_MULTI_BUTTON=$multi"
-                sed -e "s/^#define HOOD_HAS_LIFT .*/#define HOOD_HAS_LIFT $lift/" \
-                    -e "s/^#define HOOD_HAS_CEILING_LIGHT .*/#define HOOD_HAS_CEILING_LIGHT $ceiling/" \
-                    -e "s/^#define HOOD_HAS_MULTI_BUTTON .*/#define HOOD_HAS_MULTI_BUTTON $multi/" \
-                    BerbelRemote/src/config.example.h > BerbelRemote/src/config.h
-                pio run -e esp32dev -d BerbelRemote
-                echo "::endgroup::"
+          for profile in REMOTE_BFB_6BT REMOTE_BFB_7BT; do
+            for lift in true false; do
+              for ceiling in true false; do
+                for multi in true false; do
+                  echo "::group::$profile LIFT=$lift CEILING=$ceiling MULTI=$multi"
+                  sed -e "s/^#define REMOTE_PROFILE .*/#define REMOTE_PROFILE $profile/" \
+                      -e "s/^#define HOOD_HAS_LIFT .*/#define HOOD_HAS_LIFT $lift/" \
+                      -e "s/^#define HOOD_HAS_CEILING_LIGHT .*/#define HOOD_HAS_CEILING_LIGHT $ceiling/" \
+                      -e "s/^#define HOOD_HAS_MULTI_BUTTON .*/#define HOOD_HAS_MULTI_BUTTON $multi/" \
+                      BerbelRemote/src/config.example.h > BerbelRemote/src/config.h
+                  pio run -e esp32dev -d BerbelRemote
+                  echo "::endgroup::"
+                done
               done
             done
           done

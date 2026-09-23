@@ -81,7 +81,9 @@ class Logger:
             data = rest["data"]
             pretty = " ".join(data[i:i + 2] for i in range(0, len(data), 2))
             code = rest.get("code")
-            if code == 0:
+            if code is None:
+                meaning = "empty notification"
+            elif code == 0:
                 meaning = "release"
             else:
                 meaning = KNOWN_CODES.get(code, "UNKNOWN CODE")
@@ -286,11 +288,21 @@ async def find_remote(args, state, log):
 
     log("scanning", filter=args.address or ADV_SERVICE_UUID)
     async with BleakScanner(detection_callback=callback, adapter=args.adapter):
+        # Race the stop event too, or Ctrl-C sits unanswered until the scan
+        # times out, which is a minute by default.
+        stopping = asyncio.ensure_future(state.stop.wait())
         try:
-            return await asyncio.wait_for(found, timeout=args.scan_timeout)
-        except asyncio.TimeoutError:
+            done, _ = await asyncio.wait(
+                {found, stopping}, timeout=args.scan_timeout,
+                return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            stopping.cancel()
+        if found in done:
+            return found.result()
+        if not state.stop.is_set():
             log("scan_timeout", seconds=args.scan_timeout)
-            return None
+        found.cancel()
+        return None
 
 
 async def dump_profile(state, path):
@@ -356,9 +368,15 @@ async def dump_profile(state, path):
         if key in previous:
             profile.setdefault(key, previous[key])
 
-    with open(path, "w", encoding="utf-8") as handle:
+    # Write beside the target and rename over it: a crash mid-write would
+    # otherwise leave a truncated file, and the keys carried over above are
+    # exactly the ones no rerun could restore.
+    target = Path(path)
+    temporary = target.with_suffix(target.suffix + ".part")
+    with open(temporary, "w", encoding="utf-8") as handle:
         json.dump(profile, handle, indent=2, ensure_ascii=False, sort_keys=False)
         handle.write("\n")
+    os.replace(temporary, target)
 
     chars = sum(len(s["characteristics"]) for s in profile["services"])
     state.log("profile", path=path, services=len(profile["services"]),

@@ -771,7 +771,7 @@ static const char DISCOVERY_DEVICE[] =
   ",\"avty_t\":\"" MQTT_AVAIL "\""
   ",\"dev\":{\"ids\":[\"berbel_hood\"]"
   ",\"name\":\"Berbel Hood\""
-  ",\"mf\":\"Berbel\",\"mdl\":\"BFB 6bT\"}}";
+  ",\"mf\":\"Berbel\",\"mdl\":\"" REMOTE_NAME "\"}}";
 
 void publishDiscoveryMsg(const char* topic, const char* fields) {
   char buf[768];

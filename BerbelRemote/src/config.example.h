@@ -30,8 +30,9 @@
 //                   Skyline Edge Base and Play)
 //
 // Pick the one that came with your hood. The 6bT and 8bT emit an identical set
-// of codes, measured on both, so either choice reaches the same hoods; the name
-// only decides what this firmware calls itself in the log.
+// of codes, measured on both, so either choice reaches the same hoods. The name
+// only decides what this firmware calls itself: in the boot log, and as the model
+// of the device Home Assistant creates.
 //
 // The 7bT profile adds five Home Assistant buttons for the keys the other two
 // do not have, and points the Deckenlicht entity at the Uplight code 0x12

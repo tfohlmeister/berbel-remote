@@ -42,8 +42,9 @@ berbel ConInterface (Art. 1090043), built from **November 2020** onwards
 berbel has since discontinued it and replaced it with the **BFB 8bT**
 (Art. 1090093): same 13 keys, same functions, same hoods. Both were read out key
 by key and send an identical set of codes, `0x01` to `0x0D`, with nothing left
-over on either. The two profiles therefore behave the same, and which one you
-pick only changes the name in the log.
+over on either. The two profiles therefore send the same thing to the hood, and
+which one you pick only changes the name this firmware gives itself: in the boot
+log, and as the model of the device Home Assistant creates.
 
 ### BFB 7bT, for the Skyline Edge Base and Play
 

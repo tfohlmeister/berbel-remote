@@ -98,6 +98,21 @@ class Buttons(unittest.TestCase):
             hood.press(code)
             self.assertFalse(getattr(hood, attribute), code)
 
+    def test_ceiling_light_answers_both_of_its_codes(self):
+        """The firmware drives Deckenlicht from 0x0B or, on a 7bT build, 0x12."""
+        for code in (0x0B, 0x12):
+            hood = Hood()
+            hood.press(code)
+            self.assertTrue(hood.light_ceiling, f"0x{code:02X} switches it on")
+            hood.press(code)
+            self.assertFalse(hood.light_ceiling, f"0x{code:02X} switches it off")
+
+    def test_unknown_codes_report_themselves(self):
+        hood = Hood()
+        for code in (0x0E, 0x13, 0x14, 0x15, 0x16, 0x17):
+            self.assertEqual(hood.press(code), "unhandled", f"0x{code:02X}")
+        self.assertEqual(hood.frame(), bytes(9), "and change nothing")
+
     def test_afterrun_runs_in_fan_step_one(self):
         hood = Hood()
         hood.press(0x0C)
@@ -161,6 +176,18 @@ class Timers(unittest.IsolatedAsyncioTestCase):
         self.state.react(0x0C)
         self.assertFalse(self.state.hood.afterrun)
         await asyncio.sleep(0.5)
+        self.assertEqual(self.state.hood.fan, 0)
+
+    async def test_afterrun_restarts_after_an_immediate_off_and_on(self):
+        """The regression: a cancelled task is not done() yet, so the press that
+        switched the run-on back on saw a dead timer as still running and never
+        started a new one, leaving the run-on on forever."""
+        self.state.react(0x0C)
+        self.state.react(0x0C)   # off, cancels the timer
+        self.state.react(0x0C)   # on again, in the same loop iteration
+        self.assertTrue(self.state.hood.afterrun)
+        await asyncio.sleep(0.5)
+        self.assertFalse(self.state.hood.afterrun, "the new timer must have run")
         self.assertEqual(self.state.hood.fan, 0)
 
     async def test_power_ends_a_running_afterrun(self):

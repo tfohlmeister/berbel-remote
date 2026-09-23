@@ -111,7 +111,11 @@ class Hood:
             self.light_up = not self.light_up
         elif code == 0x0A:  # Unterlicht
             self.light_down = not self.light_down
-        elif code == 0x0B:  # multifunction, treated as the ceiling light
+        elif code in (0x0B, 0x12):
+            # 0x0B is the multifunction key, 0x12 the 7bT's own Uplight key.
+            # The firmware drives its Deckenlicht entity from whichever of the
+            # two the remote profile selects, so both have to land here or the
+            # fake hood cannot answer a 7bT build at all.
             self.light_ceiling = not self.light_ceiling
         elif code == 0x0C:  # afterrun, which the manual runs in fan step 1
             self.afterrun = not self.afterrun
@@ -154,6 +158,9 @@ class State:
         self.address = None
         self.stop = asyncio.Event()
         self.emulate = emulate
+        # One writer at a time: each push snapshots the frame before awaiting
+        # the write, so unordered writes can leave the remote on a stale one.
+        self.status_lock = asyncio.Lock()
         self.afterrun_seconds = afterrun_seconds
         self.hood = Hood()
         self.frame_length = 9
@@ -178,9 +185,11 @@ class State:
         client = self.client
         if client is None or not client.is_connected:
             return
-        frame = self.hood.frame(self.frame_length)
-        await client.write_gatt_char(STATUS_CHAR_UUID, frame, response=False)
-        self.log("status", data=frame.hex(), reason=reason, hood=self.hood.describe())
+        async with self.status_lock:
+            frame = self.hood.frame(self.frame_length)
+            await client.write_gatt_char(STATUS_CHAR_UUID, frame, response=False)
+            self.log("status", data=frame.hex(), reason=reason,
+                     hood=self.hood.describe())
 
     async def run_cover(self, seconds):
         """Report movement for a while, then stop, the way a lift model does."""
@@ -225,6 +234,10 @@ class State:
             self.afterrun_timer = self.spawn(self.run_afterrun(self.afterrun_seconds))
         elif not self.hood.afterrun and running:
             self.cancel(self.afterrun_timer)
+            # done() is still False right after cancel(), so leaving the handle
+            # in place would make the next press think a timer is still running
+            # and skip starting one, leaving the run-on on forever.
+            self.afterrun_timer = None
 
         self.spawn(self.push_status(f"button 0x{code:02X}"))
 
