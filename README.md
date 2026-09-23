@@ -94,10 +94,12 @@ was never tested here, though the independent
 [berbel-ha](https://github.com/dirkbloessl/berbel-ha) integration decodes the
 same status offsets on one.
 
-> A note if you extend this firmware towards colour: characteristic `f006f006`
-> is the colour and brightness channel, and there is a report of driving a
-> Skyline Edge Play over it destabilising the hood. Not reproduced here, and this
-> firmware never writes there, but worth handling with care. Details in
+> A note if you extend this firmware towards colour: `f006f006` carries the
+> hood's whole state rather than commands, and the app reaches it as a BLE
+> central, the opposite role to the one this firmware plays. Dimming and colour
+> are also a Skyline Edge **Play** feature; on a Base the berbel app itself falls
+> back to the button codes this firmware already sends. There is a report of
+> driving a Play over that characteristic destabilising the hood. Details in
 > [REVERSE_ENGINEERING.md](REVERSE_ENGINEERING.md).
 
 ### What a profile does not change

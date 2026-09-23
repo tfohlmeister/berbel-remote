@@ -16,36 +16,42 @@
       "code": 1,
       "hex": "01 00",
       "label": "power",
+      "vendor_name": "power",
       "description": "EIN/AUS"
     },
     "0x02": {
       "code": 2,
       "hex": "02 00",
       "label": "fan_1",
+      "vendor_name": "fanLevel1",
       "description": "Leistungsstufe 1"
     },
     "0x03": {
       "code": 3,
       "hex": "03 00",
       "label": "fan_2",
+      "vendor_name": "fanLevel2",
       "description": "Leistungsstufe 2"
     },
     "0x04": {
       "code": 4,
       "hex": "04 00",
       "label": "fan_3",
+      "vendor_name": "fanLevel3",
       "description": "Leistungsstufe 3"
     },
     "0x05": {
       "code": 5,
       "hex": "05 00",
       "label": "fan_p",
+      "vendor_name": "p",
       "description": "Leistungsstufe POWER"
     },
     "0x06": {
       "code": 6,
       "hex": "06 00",
       "label": "light_up",
+      "vendor_name": "effectlight",
       "description": "Effektbeleuchtung (Oberlicht)"
     },
     "0x07": {
@@ -64,30 +70,35 @@
       "code": 9,
       "hex": "09 00",
       "label": "move_up",
+      "vendor_name": "arrowUp",
       "description": "Liftfunktion \"Heben\""
     },
     "0x0a": {
       "code": 10,
       "hex": "0a 00",
       "label": "light_down",
+      "vendor_name": "cooklight",
       "description": "Kochfeld-Beleuchtung (Unterlicht)"
     },
     "0x0b": {
       "code": 11,
       "hex": "0b 00",
       "label": "multi",
+      "vendor_name": "special",
       "description": "Multifunktionstaste (BFB 6bT/8bT, in der Berbel-App belegt) / Favoritenszene (BFB 7bT) - ein Code, zwei Beschriftungen"
     },
     "0x0c": {
       "code": 12,
       "hex": "0c 00",
       "label": "timer",
+      "vendor_name": "postrun",
       "description": "Nachlauffunktion"
     },
     "0x0d": {
       "code": 13,
       "hex": "0d 00",
       "label": "move_down",
+      "vendor_name": "arrowDown",
       "description": "Liftfunktion \"Senken\""
     },
     "0x0e": {
@@ -100,6 +111,7 @@
       "code": 18,
       "hex": "12 00",
       "label": "light_uplight",
+      "vendor_name": "uplight",
       "description": "Uplight (BFB 7bT, nur BIH SKEP); in dieser Firmware Deckenlicht"
     },
     "0x13": {
@@ -156,7 +168,7 @@
     "no_function": 14
   },
   "capture_date": "2026-09-22",
-  "notes": "Button codes for the Berbel remotes. The BFB 6bT and BFB 8bT have 13 buttons on 0x01-0x0D; the BFB 7bT has 19 on 0x01-0x0E and 0x12-0x17, without 0x07 since it has no Synchronisation key. Every code here was measured: the 8bT and the 7bT were read out button by button with tools/fakehood, and each code matched to its key through the symbol tables in the berbel manuals 6007335_0 (8bT) and 6007021_0 (7bT). 0x07 and 0x08 used to be assigned by elimination and are now measured. 0x0F to 0x11 were emitted by no button on either remote. Which functions a button performs depends on the hood's equipment; the remote sends the code either way.",
+  "notes": "Button codes for the Berbel remotes. The BFB 6bT and BFB 8bT have 13 buttons on 0x01-0x0D; the BFB 7bT has 19 on 0x01-0x0E and 0x12-0x17, without 0x07 since it has no Synchronisation key. Every code here was measured: the 8bT and the 7bT were read out button by button with tools/fakehood, and each code matched to its key through the symbol tables in the berbel manuals 6007335_0 (8bT) and 6007021_0 (7bT). 0x07 and 0x08 used to be assigned by elimination and are now measured. 0x0F to 0x11 were emitted by no button on either remote. Which functions a button performs depends on the hood's equipment; the remote sends the code either way. Twelve of these codes are independently confirmed by the berbel Plus Android app (de.berbel.plus 1.2.0), whose RemoteControlButton enum carries the same wire values under the vendor's own names, recorded here as vendor_name. The app writes them to f006f004 as 00 <code> with 00 00 as the release, the same two frames a remote sends with the bytes the other way round. 0x07 and 0x08 have no counterpart in the app; they are hood equipment keys, not app functions. See REVERSE_ENGINEERING.md.",
   "remotes": {
     "BFB 6bT": {
       "article": "1090045",

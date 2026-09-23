@@ -315,9 +315,11 @@ ride connection events, so the gap between them can only ever be a multiple of i
 
 ## The berbel App as a Second Source
 
-The Skyline Edge hoods expose a GATT server of their own, which the berbel
-iPhone app talks to. Captured with PacketLogger by @jens-42 on a Skyline Edge
-Play ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)):
+The Skyline hoods expose a GATT server of their own, which the berbel app talks
+to. Two independent looks at it exist.
+
+**A capture.** PacketLogger on a Skyline Edge Play, by @jens-42
+([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)):
 
 | App action | Characteristic | Value |
 |---|---|---|
@@ -331,34 +333,141 @@ Play ([issue #3](https://github.com/tfohlmeister/berbel-remote/issues/3)):
 | Effektbeleuchtung on | `f006f006` | `00a30000ff00000005ffffff00ff0000` + 15 zero bytes |
 | Effektbeleuchtung off | `f006f006` | `00a30000ff00000005ffffff0000…` |
 
-**Those are our button codes.** `0002` through `0005`, `000a` and `000c` carry
-the same code numbers this firmware sends to `f004f002` as a remote. The framing
-differs: the app writes the code in the second byte (`00 02`), the remote sends
-it in the first (`02 00`, followed by `00 00` as the release). Same vocabulary,
-two channels, so the app is a legitimate source for codes the remote's manual
-does not name. `0012` for the Deckenlicht was found precisely this way and then
-confirmed on the hood.
+**The app itself.** `de.berbel.plus` 1.2.0 for Android is a Flutter app whose
+Dart AOT snapshot is not obfuscated, so class names, method names and the
+constant pool survive decompilation. Everything below is read out of its machine
+code, not measured on a hood.
 
-### `f006f006`, the colour channel: handle with care
+### Two protocols, not one
 
-Colour and brightness are written to `f006f006` as 31-byte payloads rather than
-button codes. This firmware does not speak it.
+`f004` and `f006` are separate worlds inside the same appliance, and they invert
+the BLE roles:
 
-There is a report of it destabilising a hood. @jens-42 wrote that controlling a
-Skyline Edge Play over `f006f006` "frequently leads to crashes, requiring me to
-flip the circuit breaker to restart the unit", with gesture control (the laser
-dot) dead until then, while the two-byte writes to `f006f004` were "absolutely
-reliable" for him. That is one report from one hood, not reproduced here, and it
-may well depend on the model or on how the writes are paced. Worth knowing
-rather than worth panicking about.
+| | `f004…` | `f006…` |
+|---|---|---|
+| GATT server lives on | the remote | the hood |
+| The other side connects as | hood as central | app as central |
+| Status framing | bitmasks over 9 or 13 bytes | one byte per value |
+| What this firmware is | the server, a remote | nothing, it never connects |
 
-None of it affects using this firmware, which never writes to `f006f006`. It is
-something to keep in mind if you extend it towards colour, since that is the
-channel you would need.
+So the app cannot explain the remote protocol's status frames, and reading it
+tells us nothing new about them. For the button codes it is a genuine second
+source, because both channels carry the same vocabulary.
+
+### The button codes, confirmed by the vendor
+
+The app's `RemoteControlButton` enum sits in the constant pool with both the
+wire code and the vendor's own name for it. Twelve of our codes come back
+unchanged:
+
+| Code | Vendor name | Our label |
+|---|---|---|
+| 0x01 | `power` | power |
+| 0x02 | `fanLevel1` | fan_1 |
+| 0x03 | `fanLevel2` | fan_2 |
+| 0x04 | `fanLevel3` | fan_3 |
+| 0x05 | `p` | fan_p |
+| 0x06 | `effectlight` | light_up |
+| 0x09 | `arrowUp` | move_up |
+| 0x0A | `cooklight` | light_down |
+| 0x0B | `special` | multi |
+| 0x0C | `postrun` | timer |
+| 0x0D | `arrowDown` | move_down |
+| 0x12 | `uplight` | light_uplight |
+
+`pressRemoteControlButton` writes `00 <code>` and then `00 00` as the release,
+the same two-frame gesture a remote makes, with the two bytes the other way
+round.
+
+**`0x07` and `0x08` do not appear in the app at all.** Both were measured on a
+BFB 8bT with `tools/fakehood`, so this is not a gap in our reading; the app
+simply has no model for a Synchronisation or a recirculation key, which are hood
+equipment rather than app functions.
+
+### `f006f006` is state, not a command channel
+
+The app reads this characteristic, changes single bytes and writes the whole
+array back. That is why the payloads look like frames with a fixed header: the
+bytes nobody touched are simply what the hood last reported.
+
+| Byte | Meaning |
+|---|---|
+| 0 | lift control: 0 standby, 1 hard stop, 2 stop, 3 up, 4 down, 5 slow up, 6 slow down |
+| 1 | lift position, raw, no documented unit |
+| 4 / 5 / 6 | brightness of cooklight / effectlight / ambilight, 0-255 |
+| 7 | effect light mode: 0 warm white, 1 RGB, 2 light sequence |
+| 9 / 10 / 11 | effect light red / green / blue |
+| 13 | effect light brightness, 0-255 |
+| 16 | fan speed as a number: 0 off, 1-3, 4 power, 5 P fix |
+| 22 | filter saturation, 0-255 |
+| 28 | active scene, 0 for none |
+
+Bytes 2, 3, 8, 12, 14, 15, 17 to 21 and 23 to 27 are either not read by the app
+or read without any consumer. Every write outside scene handling clears byte 28,
+which is how changing anything by hand drops the active scene.
+
+That decodes the capture above completely:
+
+```
+index  0  1  2  3  4  5  6  7  8  9 10 11 12 13 …
+       00 a3 00 00 ff 00 00 00 05 ff ff ff 00 ff
+                                  ^^ ^^ ^^    ^^
+                                  r  g  b     brightness
+```
+
+White at full brightness, and the "off" variant differs in exactly byte 13.
+
+The postrun is **not** in this frame. The app keeps a `postRunStartTimeStamp` of
+its own and works it out locally.
+
+### The other characteristics
+
+| UUID | Direction | Content |
+|---|---|---|
+| `f006f001` | read | ASCII device type: model name, then `_100`/`_120`, `_BASE`/`_PLAY`, `_BUR`/`_BUF` |
+| `f006f002` | read, write | the user-assigned device name, 30 bytes |
+| `f006f007` | read, write | user settings, including colour temperature at byte 6/7/8 for cooklight/effectlight/ambilight |
+| `f007f001`…`f007f016` | read, write, notify | 16 scene slots of 38 bytes each, name in 0-19 |
+
+The slice boundaries in the device type string are read as 0-19, 20-23, 24-31
+and 32-35, for 36 bytes in total. That rests on how a constant is tagged in the
+decompiled code, and the alternative reading halves every offset. The token
+lengths only fit the first reading, but a single read off a real hood would
+settle it and nobody has done that.
+
+The app finds hoods by manufacturer data alone: the first two bytes must be
+`0c 90`. There is no service filter and no name prefix.
+
+### Brightness and colour are a Play feature
+
+On a `base` hood the app does not use any of this for the effect light. It falls
+back to `pressRemoteControlButton(effectlight)`, the same button code this
+firmware already sends. The dimming, RGB and colour temperature paths run only
+for `play`. Anyone hoping to gain dimmable lights from `f006` should read the
+variant out of `f006f001` first.
+
+### Why this firmware does not speak it
+
+Reaching `f006` would mean being a central as well as a peripheral, holding a
+second connection in the opposite direction, and bonding with the hood. The
+build deliberately compiles the central and observer roles out
+(`CONFIG_BT_NIMBLE_ROLE_CENTRAL_DISABLED`), which is a large part of why NimBLE
+fits at all.
+
+There is also a report of writes destabilising a hood. @jens-42 wrote that
+controlling a Skyline Edge Play over `f006f006` "frequently leads to crashes,
+requiring me to flip the circuit breaker to restart the unit", with gesture
+control (the laser dot) dead until then, while the two-byte writes to `f006f004`
+were "absolutely reliable" for him. That is one report from one hood, not
+reproduced here. Knowing now that the characteristic carries whole state rather
+than commands makes a partial or stale array a plausible way to upset a hood,
+but that is a hypothesis, not a finding.
 
 [berbel-ha](https://github.com/dirkbloessl/berbel-ha) sends its light and fan
-commands over `f006f006` (`WRITE_COMMANDS` in its `const.py`) and evidently works
-for its users. Its status parsing is independently useful and agrees with ours.
+commands over `f006f006` (`WRITE_COMMANDS` in `berbel_ble/const.py`) and evidently
+works for its users. Its byte offsets agree with the app; its names do not. What
+it calls the top light is the effectlight and what it calls the bottom light is
+the cooklight, and it has no notion of the third channel, the ambilight.
 
 ## Hood Status Protocol
 
